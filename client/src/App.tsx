@@ -6,32 +6,32 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 
-
 function Router() {
   return (
     <Switch>
       <Route path={"/"} component={Home} />
       <Route path={"/404"} component={NotFound} />
-      {/* Final fallback route */}
       <Route component={NotFound} />
     </Switch>
   );
 }
 
-// NOTE: About Theme
-// - First choose a default theme according to your design style (dark or light bg), than change color palette in index.css
-//   to keep consistent foreground/background color across components
-// - If you want to make theme switchable, pass `switchable` ThemeProvider and use `useTheme` hook
-
 function App() {
   return (
     <ErrorBoundary>
-      <ThemeProvider
-        defaultTheme="light"
-        // switchable
-      >
+      <ThemeProvider defaultTheme="dark">
         <TooltipProvider>
-          <Toaster />
+          <Toaster
+            position="bottom-right"
+            toastOptions={{
+              style: {
+                background: 'oklch(0.18 0.012 250)',
+                border: '1px solid oklch(0.3 0.012 250)',
+                color: 'oklch(0.87 0.01 250)',
+                fontFamily: "'Inter', system-ui, sans-serif",
+              },
+            }}
+          />
           <Router />
         </TooltipProvider>
       </ThemeProvider>
