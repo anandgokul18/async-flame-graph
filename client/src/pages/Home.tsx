@@ -15,6 +15,8 @@ import {
   Info,
   ChevronDown,
   ChevronUp,
+  Link2,
+  Check,
 } from "lucide-react";
 import FlameGraph from "@/components/FlameGraph";
 import type { FlameGraphHandle } from "@/components/FlameGraph";
@@ -28,11 +30,65 @@ import type { FlameData, ProcessedSpan } from "@/lib/flameEngine";
 const HERO_BG = "https://d2xsxph8kpxj0f.cloudfront.net/310519663317962886/FDYfY7epknZCTg7EfFmBWa/hero-bg-Xups4ahTbG6j4WWTCBp4Av.webp";
 const EMPTY_STATE_IMG = "https://d2xsxph8kpxj0f.cloudfront.net/310519663317962886/FDYfY7epknZCTg7EfFmBWa/empty-state-ju4EJPW4H52F5c24VJcxKe.webp";
 
+// ─── URL Parameter Helpers ──────────────────────────────────────────────────
+
+function getInitialStateFromURL(): { json: string; hz: number } {
+  const params = new URLSearchParams(window.location.search);
+
+  let json = '';
+  let hz = 100;
+
+  // Parse hz
+  const hzParam = params.get('hz') || params.get('sampling_rate') || params.get('samplingRate');
+  if (hzParam) {
+    const parsed = parseInt(hzParam, 10);
+    if (!isNaN(parsed) && parsed > 0) hz = parsed;
+  }
+
+  // Parse json — try base64 first, then URL-encoded, then raw
+  const jsonParam = params.get('json') || params.get('data');
+  if (jsonParam) {
+    // Try base64 decode
+    try {
+      const decoded = atob(jsonParam);
+      // Verify it's valid JSON
+      JSON.parse(decoded);
+      json = decoded;
+    } catch {
+      // Not base64 — try using as-is (URL decoding is automatic from URLSearchParams)
+      try {
+        JSON.parse(jsonParam);
+        json = jsonParam;
+      } catch {
+        // Invalid JSON, leave empty
+        json = jsonParam; // still set it so user sees the error
+      }
+    }
+  }
+
+  return { json, hz };
+}
+
+function buildShareURL(json: string, hz: number): string {
+  const url = new URL(window.location.origin + window.location.pathname);
+  if (hz !== 100) {
+    url.searchParams.set('hz', String(hz));
+  }
+  if (json.trim()) {
+    // Use base64 to avoid URL encoding issues with complex JSON
+    url.searchParams.set('json', btoa(json));
+  }
+  return url.toString();
+}
+
 export default function Home() {
+  // ─── URL-driven initial state ─────────────────────────────────────────────
+  const initialState = useMemo(() => getInitialStateFromURL(), []);
+
   // ─── State ─────────────────────────────────────────────────────────────────
-  const [jsonInput, setJsonInput] = useState('');
-  const [hz, setHz] = useState(100);
-  const [panelOpen, setPanelOpen] = useState(true);
+  const [jsonInput, setJsonInput] = useState(initialState.json);
+  const [hz, setHz] = useState(initialState.hz);
+  const [panelOpen, setPanelOpen] = useState(!initialState.json); // auto-close panel if data was passed via URL
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [flameData, setFlameData] = useState<FlameData | null>(null);
 
@@ -50,8 +106,31 @@ export default function Home() {
   // Info panel
   const [showInfo, setShowInfo] = useState(false);
 
+  // Share URL state
+  const [showCopied, setShowCopied] = useState(false);
+
   // Flame graph ref for zoom controls
   const flameGraphRef = useRef<FlameGraphHandle>(null);
+
+  // ─── Sync state to URL (debounced, replaceState to avoid polluting history) ─
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const url = new URL(window.location.href);
+      if (hz !== 100) {
+        url.searchParams.set('hz', String(hz));
+      } else {
+        url.searchParams.delete('hz');
+      }
+      // Only sync json to URL if it's reasonably small (< 20KB base64)
+      if (jsonInput.trim() && jsonInput.length < 15000) {
+        url.searchParams.set('json', btoa(jsonInput));
+      } else {
+        url.searchParams.delete('json');
+      }
+      window.history.replaceState({}, '', url.toString());
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [jsonInput, hz]);
 
   // ─── Process JSON ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -158,6 +237,26 @@ export default function Home() {
         </div>
 
         <div className="flex items-center gap-2">
+          {jsonInput.trim() && (
+            <button
+              onClick={() => {
+                const url = buildShareURL(jsonInput, hz);
+                navigator.clipboard.writeText(url).then(() => {
+                  setShowCopied(true);
+                  setTimeout(() => setShowCopied(false), 2000);
+                });
+              }}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded text-[11px] font-medium transition-all ${
+                showCopied
+                  ? 'bg-green-500/15 border border-green-500/30 text-green-400'
+                  : 'bg-[#161B22] border border-[#21262D] text-[#8B949E] hover:text-[#E6EDF3] hover:border-[#00D4FF]/30'
+              }`}
+              title="Copy shareable URL with current data"
+            >
+              {showCopied ? <Check size={12} /> : <Link2 size={12} />}
+              {showCopied ? 'Copied!' : 'Share URL'}
+            </button>
+          )}
           <button
             onClick={() => setShowInfo(!showInfo)}
             className="p-1.5 rounded hover:bg-[#161B22] text-[#8B949E] hover:text-[#E6EDF3] transition-colors"
@@ -201,6 +300,15 @@ export default function Home() {
               <kbd className="px-1 py-0.5 rounded bg-[#21262D] text-[#8B949E] ml-1">Ctrl+F</kbd> Search &middot;
               <kbd className="px-1 py-0.5 rounded bg-[#21262D] text-[#8B949E] ml-1">Ctrl+B</kbd> Toggle Panel &middot;
               <kbd className="px-1 py-0.5 rounded bg-[#21262D] text-[#8B949E] ml-1">+/-</kbd> Zoom
+            </div>
+            <div className="mt-2 pt-2 border-t border-[#21262D] text-[10px] text-[#6E7681]">
+              <p className="font-medium text-[#E6EDF3] mb-1">URL Parameters:</p>
+              <p className="mb-0.5">Pass data via URL query params for sharing or automation:</p>
+              <code className="block mt-1 px-2 py-1 rounded bg-[#21262D] text-[#E6EDF3] font-mono text-[9px] break-all">
+                ?hz=100&json=<span className="text-[#8B949E]">{'<base64-encoded-json>'}</span>
+              </code>
+              <p className="mt-1">Supported params: <code className="text-[#E6EDF3]">hz</code> (or <code className="text-[#E6EDF3]">sampling_rate</code>), <code className="text-[#E6EDF3]">json</code> (or <code className="text-[#E6EDF3]">data</code>) — base64 or URL-encoded.</p>
+              <p className="mt-0.5">Click the <span className="text-[#00D4FF]">Share URL</span> button in the header to copy a shareable link.</p>
             </div>
           </div>
         </div>
