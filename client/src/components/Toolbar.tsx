@@ -4,7 +4,6 @@
  * Features: search, view mode toggle, color mode, reset
  */
 
-import { useState } from "react";
 import {
   Search,
   RotateCcw,
@@ -15,6 +14,8 @@ import {
   X,
   AlignLeft,
   AlignRight,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 
 export type ViewMode = 'flame' | 'table' | 'both';
@@ -34,6 +35,9 @@ interface ToolbarProps {
   onResetFocus: () => void;
   totalDuration: number;
   spanCount: number;
+  onZoomIn?: () => void;
+  onZoomOut?: () => void;
+  onResetZoom?: () => void;
 }
 
 export default function Toolbar({
@@ -49,6 +53,9 @@ export default function Toolbar({
   onResetFocus,
   totalDuration,
   spanCount,
+  onZoomIn,
+  onZoomOut,
+  onResetZoom,
 }: ToolbarProps) {
   return (
     <div className="flex items-center gap-2 px-3 py-2 bg-[#0D1117] border-b border-[#21262D]">
@@ -136,6 +143,34 @@ export default function Toolbar({
       >
         {textAlign === 'left' ? <AlignLeft size={13} /> : <AlignRight size={13} />}
       </button>
+
+      {/* Divider */}
+      <div className="w-px h-5 bg-[#21262D]" />
+
+      {/* Zoom controls */}
+      <div className="flex items-center bg-[#161B22] rounded border border-[#21262D]">
+        <button
+          onClick={onZoomOut}
+          className="p-1.5 rounded-l text-[#8B949E] hover:text-[#E6EDF3] hover:bg-[#21262D] transition-colors"
+          title="Zoom out"
+        >
+          <ZoomOut size={14} />
+        </button>
+        <button
+          onClick={onResetZoom}
+          className="px-2 py-1.5 text-[10px] font-mono text-[#8B949E] hover:text-[#E6EDF3] hover:bg-[#21262D] transition-colors border-x border-[#21262D]"
+          title="Reset zoom"
+        >
+          1:1
+        </button>
+        <button
+          onClick={onZoomIn}
+          className="p-1.5 rounded-r text-[#8B949E] hover:text-[#E6EDF3] hover:bg-[#21262D] transition-colors"
+          title="Zoom in"
+        >
+          <ZoomIn size={14} />
+        </button>
+      </div>
 
       {/* Divider */}
       <div className="w-px h-5 bg-[#21262D]" />

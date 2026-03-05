@@ -6,7 +6,7 @@
  * Key feature: Proper async/parallel visualization with wall-clock time
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   PanelLeftClose,
   PanelLeftOpen,
@@ -17,6 +17,7 @@ import {
   ChevronUp,
 } from "lucide-react";
 import FlameGraph from "@/components/FlameGraph";
+import type { FlameGraphHandle } from "@/components/FlameGraph";
 import SpanTooltip from "@/components/SpanTooltip";
 import SpanTable from "@/components/SpanTable";
 import JsonInput from "@/components/JsonInput";
@@ -48,6 +49,9 @@ export default function Home() {
 
   // Info panel
   const [showInfo, setShowInfo] = useState(false);
+
+  // Flame graph ref for zoom controls
+  const flameGraphRef = useRef<FlameGraphHandle>(null);
 
   // ─── Process JSON ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -178,7 +182,7 @@ export default function Home() {
                   <span className="text-[#E6EDF3] font-medium">2.</span> Set the sample rate (Hz) if using sample-based data
                 </p>
                 <p className="mb-1.5">
-                  <span className="text-[#E6EDF3] font-medium">3.</span> Click spans to focus, scroll to zoom, drag to pan
+                  <span className="text-[#E6EDF3] font-medium">3.</span> Click spans to focus, use toolbar zoom buttons, drag to pan
                 </p>
               </div>
               <div>
@@ -196,7 +200,7 @@ export default function Home() {
               Shortcuts: <kbd className="px-1 py-0.5 rounded bg-[#21262D] text-[#8B949E]">Esc</kbd> Reset &middot;
               <kbd className="px-1 py-0.5 rounded bg-[#21262D] text-[#8B949E] ml-1">Ctrl+F</kbd> Search &middot;
               <kbd className="px-1 py-0.5 rounded bg-[#21262D] text-[#8B949E] ml-1">Ctrl+B</kbd> Toggle Panel &middot;
-              <kbd className="px-1 py-0.5 rounded bg-[#21262D] text-[#8B949E] ml-1">Scroll</kbd> Zoom
+              <kbd className="px-1 py-0.5 rounded bg-[#21262D] text-[#8B949E] ml-1">+/-</kbd> Zoom
             </div>
           </div>
         </div>
@@ -238,6 +242,9 @@ export default function Home() {
                 onResetFocus={handleResetFocus}
                 totalDuration={flameData.totalDuration}
                 spanCount={flameData.allSpans.length}
+                onZoomIn={() => flameGraphRef.current?.zoomIn()}
+                onZoomOut={() => flameGraphRef.current?.zoomOut()}
+                onResetZoom={() => flameGraphRef.current?.resetZoom()}
               />
 
               {/* Visualization area */}
@@ -246,6 +253,7 @@ export default function Home() {
                 {(viewMode === 'flame' || viewMode === 'both') && (
                   <div className={`overflow-auto bg-[#0D1117] ${viewMode === 'both' ? 'flex-[2]' : 'flex-1'} min-h-[250px]`}>
                     <FlameGraph
+                      ref={flameGraphRef}
                       data={flameData}
                       searchQuery={searchQuery}
                       colorMode={colorMode}

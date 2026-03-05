@@ -6,7 +6,7 @@
  * Time axis shows seconds (wall-clock time)
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, forwardRef } from "react";
 import type { FlameData, ProcessedSpan } from "@/lib/flameEngine";
 import { formatDuration } from "@/lib/flameEngine";
 
@@ -29,6 +29,12 @@ interface FlameGraphProps {
   onSpanClick?: (span: ProcessedSpan) => void;
   onSpanHover?: (span: ProcessedSpan | null, x: number, y: number) => void;
   focusedSpan?: ProcessedSpan | null;
+}
+
+export interface FlameGraphHandle {
+  zoomIn: () => void;
+  zoomOut: () => void;
+  resetZoom: () => void;
 }
 
 interface ViewState {
@@ -174,14 +180,14 @@ function drawTimeline(
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 
-export default function FlameGraph({
+const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameGraph({
   data,
   searchQuery,
   colorMode,
   onSpanClick,
   onSpanHover,
   focusedSpan,
-}: FlameGraphProps) {
+}, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [viewState, setViewState] = useState<ViewState>({ offsetX: 0, zoom: 1 });
@@ -495,28 +501,36 @@ export default function FlameGraph({
     onSpanHover?.(null, 0, 0);
   }, [onSpanHover]);
 
-  const handleWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
+  // ─── Imperative zoom controls (exposed via ref) ────────────────────────
 
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const rect = canvas.getBoundingClientRect();
-    const mouseX = (e.clientX - rect.left) / canvasSize.width;
-
-    const zoomFactor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-
+  const zoomIn = useCallback(() => {
     setViewState(prev => {
-      const newZoom = Math.max(1, Math.min(500, prev.zoom * zoomFactor));
-      // Zoom towards mouse position
-      const newOffsetX = mouseX - (mouseX - prev.offsetX) * (newZoom / prev.zoom);
-
-      return {
-        zoom: newZoom,
-        offsetX: newOffsetX,
-      };
+      const newZoom = Math.min(500, prev.zoom * 1.4);
+      // Zoom towards center
+      const center = 0.5;
+      const newOffsetX = center - (center - prev.offsetX) * (newZoom / prev.zoom);
+      return { zoom: newZoom, offsetX: newOffsetX };
     });
-  }, [canvasSize.width]);
+  }, []);
+
+  const zoomOut = useCallback(() => {
+    setViewState(prev => {
+      const newZoom = Math.max(1, prev.zoom / 1.4);
+      const center = 0.5;
+      const newOffsetX = center - (center - prev.offsetX) * (newZoom / prev.zoom);
+      return { zoom: newZoom, offsetX: newOffsetX };
+    });
+  }, []);
+
+  const resetZoom = useCallback(() => {
+    setViewState({ offsetX: 0, zoom: 1 });
+  }, []);
+
+  useImperativeHandle(ref, () => ({
+    zoomIn,
+    zoomOut,
+    resetZoom,
+  }), [zoomIn, zoomOut, resetZoom]);
 
   // Reset view
   useEffect(() => {
@@ -538,8 +552,9 @@ export default function FlameGraph({
         onMouseDown={handleMouseDown}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseLeave}
-        onWheel={handleWheel}
       />
     </div>
   );
-}
+});
+
+export default FlameGraph;
