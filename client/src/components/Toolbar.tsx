@@ -1,7 +1,7 @@
 /**
  * Toolbar — Flame graph control bar
  * Design: Observatory dark console
- * Features: search, view mode toggle, color mode, reset
+ * Features: search, view mode toggle, render mode toggle, color mode, reset
  */
 
 import {
@@ -16,7 +16,10 @@ import {
   AlignRight,
   ZoomIn,
   ZoomOut,
+  Clock,
+  Scale,
 } from "lucide-react";
+import type { RenderMode } from "@/lib/flameEngine";
 
 export type ViewMode = 'flame' | 'table' | 'both';
 export type ColorMode = 'self-time' | 'package';
@@ -31,6 +34,8 @@ interface ToolbarProps {
   onColorModeChange: (mode: ColorMode) => void;
   textAlign: TextAlign;
   onTextAlignChange: (align: TextAlign) => void;
+  renderMode: RenderMode;
+  onRenderModeChange: (mode: RenderMode) => void;
   focusedSpanName: string | null;
   onResetFocus: () => void;
   totalDuration: number;
@@ -49,6 +54,8 @@ export default function Toolbar({
   onColorModeChange,
   textAlign,
   onTextAlignChange,
+  renderMode,
+  onRenderModeChange,
   focusedSpanName,
   onResetFocus,
   totalDuration,
@@ -118,6 +125,40 @@ export default function Toolbar({
           <Columns size={14} />
         </button>
       </div>
+
+      {/* Divider */}
+      <div className="w-px h-5 bg-[#21262D]" />
+
+      {/* Render mode toggle: Wall-Clock vs Scaled */}
+      <div className="flex items-center bg-[#161B22] rounded border border-[#21262D]">
+        <button
+          onClick={() => onRenderModeChange('wall-clock')}
+          className={`flex items-center gap-1 px-2 py-1.5 rounded-l text-[11px] transition-colors ${
+            renderMode === 'wall-clock'
+              ? 'bg-[#21262D] text-[#00D4FF]'
+              : 'text-[#6E7681] hover:text-[#8B949E]'
+          }`}
+          title="Wall-Clock mode (to_dict): Shows true parallel durations. Children can overflow parent width."
+        >
+          <Clock size={12} />
+          <span className="hidden sm:inline">Wall-Clock</span>
+        </button>
+        <button
+          onClick={() => onRenderModeChange('scaled')}
+          className={`flex items-center gap-1 px-2 py-1.5 rounded-r text-[11px] transition-colors ${
+            renderMode === 'scaled'
+              ? 'bg-[#21262D] text-[#FFB020]'
+              : 'text-[#6E7681] hover:text-[#8B949E]'
+          }`}
+          title="Scaled mode (to_scaled_dict): Children proportionally fit within parent. Hover for wall-clock values."
+        >
+          <Scale size={12} />
+          <span className="hidden sm:inline">Scaled</span>
+        </button>
+      </div>
+
+      {/* Divider */}
+      <div className="w-px h-5 bg-[#21262D]" />
 
       {/* Color mode */}
       <button

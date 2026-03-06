@@ -5,7 +5,12 @@
  */
 
 import { useCallback, useRef, useState } from "react";
-import { generateSampleData, generateSampleDataSamples } from "@/lib/flameEngine";
+import {
+  generateSampleData,
+  generateSampleDataSamples,
+  generateSampleWallClock,
+  generateSampleScaled,
+} from "@/lib/flameEngine";
 import {
   AlertCircle,
   CheckCircle2,
@@ -37,7 +42,6 @@ export default function JsonInput({
   const lineCount = value ? value.split('\n').length : 1;
 
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
-    // Let default paste happen, then try to format
     setTimeout(() => {
       const textarea = textareaRef.current;
       if (!textarea) return;
@@ -46,7 +50,7 @@ export default function JsonInput({
         const formatted = JSON.stringify(parsed, null, 2);
         onChange(formatted);
       } catch {
-        // Not valid JSON yet, that's fine
+        // Not valid JSON yet
       }
     }, 0);
   }, [onChange]);
@@ -68,8 +72,22 @@ export default function JsonInput({
     reader.readAsText(file);
   }, [onChange]);
 
-  const loadSample = useCallback((type: 'time' | 'samples') => {
-    const data = type === 'time' ? generateSampleData() : generateSampleDataSamples();
+  const loadSample = useCallback((type: 'time' | 'samples' | 'wall-clock' | 'scaled') => {
+    let data;
+    switch (type) {
+      case 'time':
+        data = generateSampleData();
+        break;
+      case 'samples':
+        data = generateSampleDataSamples();
+        break;
+      case 'wall-clock':
+        data = generateSampleWallClock();
+        break;
+      case 'scaled':
+        data = generateSampleScaled();
+        break;
+    }
     onChange(JSON.stringify(data, null, 2));
     setShowSamples(false);
   }, [onChange]);
@@ -114,18 +132,39 @@ export default function JsonInput({
               Samples <ChevronDown size={11} />
             </button>
             {showSamples && (
-              <div className="absolute right-0 top-full mt-1 z-50 glass-panel rounded-md shadow-xl py-1 min-w-[180px]">
+              <div className="absolute right-0 top-full mt-1 z-50 glass-panel rounded-md shadow-xl py-1 min-w-[240px]">
+                <div className="px-3 py-1 text-[9px] text-[#6E7681] uppercase tracking-wider">
+                  Time-based
+                </div>
                 <button
                   onClick={() => loadSample('time')}
                   className="w-full text-left px-3 py-1.5 text-[11px] text-[#E6EDF3] hover:bg-[#21262D] transition-colors"
                 >
-                  Async HTTP Request (time-based)
+                  Async HTTP Request (startTime/endTime)
                 </button>
                 <button
                   onClick={() => loadSample('samples')}
                   className="w-full text-left px-3 py-1.5 text-[11px] text-[#E6EDF3] hover:bg-[#21262D] transition-colors"
                 >
-                  CPU Profile (sample-based)
+                  CPU Profile (sample-based values)
+                </button>
+                <div className="my-1 border-t border-[#21262D]" />
+                <div className="px-3 py-1 text-[9px] text-[#6E7681] uppercase tracking-wider">
+                  Profiler Formats
+                </div>
+                <button
+                  onClick={() => loadSample('wall-clock')}
+                  className="w-full text-left px-3 py-1.5 text-[11px] text-[#E6EDF3] hover:bg-[#21262D] transition-colors"
+                >
+                  <span className="text-[#00D4FF]">to_dict()</span>
+                  <span className="text-[#6E7681] ml-1">— Wall-clock (concurrent=true)</span>
+                </button>
+                <button
+                  onClick={() => loadSample('scaled')}
+                  className="w-full text-left px-3 py-1.5 text-[11px] text-[#E6EDF3] hover:bg-[#21262D] transition-colors"
+                >
+                  <span className="text-[#FFB020]">to_scaled_dict()</span>
+                  <span className="text-[#6E7681] ml-1">— Scaled (_wall_clock)</span>
                 </button>
               </div>
             )}
@@ -188,10 +227,12 @@ export default function JsonInput({
 Supported formats:
 • Span tree: { name, startTime, endTime, children: [...] }
 • Sample tree: { name, value, children: [...] }
+• Profiler to_dict(): { name, value, concurrent: true, children: [...] }
+• Profiler to_scaled_dict(): { name, value, _wall_clock, children: [...] }
 • OpenTelemetry spans
 • Flat profile: [{ level, value, self, label }]
 
-Tip: Use "async": true on parent spans
+Tip: Use "concurrent": true or "async": true
      to enable parallel child rendering.`}
             spellCheck={false}
             autoComplete="off"

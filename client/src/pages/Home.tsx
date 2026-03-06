@@ -4,6 +4,7 @@
  * Design: "Observatory" dark data console
  * Layout: Collapsible left panel (JSON input) + full-width flame graph + bottom table
  * Key feature: Proper async/parallel visualization with wall-clock time
+ * Supports both to_dict() (wall-clock) and to_scaled_dict() (scaled) render modes
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -13,8 +14,6 @@ import {
   Flame,
   Zap,
   Info,
-  ChevronDown,
-  ChevronUp,
   Link2,
   Check,
 } from "lucide-react";
@@ -24,21 +23,26 @@ import SpanTooltip from "@/components/SpanTooltip";
 import SpanTable from "@/components/SpanTable";
 import JsonInput from "@/components/JsonInput";
 import Toolbar, { type ViewMode, type ColorMode, type TextAlign } from "@/components/Toolbar";
-import { processFlameData, formatDuration, generateSampleData } from "@/lib/flameEngine";
-import type { FlameData, ProcessedSpan } from "@/lib/flameEngine";
-import { parseUrlState, buildShareUrl, syncUrlState, getCompressionInfo } from "@/lib/urlCodec";
+import {
+  processFlameData,
+  formatDuration,
+  generateSampleData,
+  detectRecommendedMode,
+} from "@/lib/flameEngine";
+import type { FlameData, ProcessedSpan, RenderMode } from "@/lib/flameEngine";
+import { parseUrlState, buildShareUrl, syncUrlState } from "@/lib/urlCodec";
 
 const HERO_BG = "https://d2xsxph8kpxj0f.cloudfront.net/310519663317962886/FDYfY7epknZCTg7EfFmBWa/hero-bg-Xups4ahTbG6j4WWTCBp4Av.webp";
 const EMPTY_STATE_IMG = "https://d2xsxph8kpxj0f.cloudfront.net/310519663317962886/FDYfY7epknZCTg7EfFmBWa/empty-state-ju4EJPW4H52F5c24VJcxKe.webp";
 
 export default function Home() {
-  // ─── URL-driven initial state (compressed hash fragment or legacy query params) ─
+  // ─── URL-driven initial state ─────────────────────────────────────────────
   const initialState = useMemo(() => parseUrlState(), []);
 
   // ─── State ─────────────────────────────────────────────────────────────────
   const [jsonInput, setJsonInput] = useState(initialState.json);
   const [hz, setHz] = useState(initialState.hz);
-  const [panelOpen, setPanelOpen] = useState(!initialState.json); // auto-close panel if data was passed via URL
+  const [panelOpen, setPanelOpen] = useState(!initialState.json);
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [flameData, setFlameData] = useState<FlameData | null>(null);
 
@@ -47,6 +51,7 @@ export default function Home() {
   const [viewMode, setViewMode] = useState<ViewMode>('both');
   const [colorMode, setColorMode] = useState<ColorMode>('self-time');
   const [textAlign, setTextAlign] = useState<TextAlign>('left');
+  const [renderMode, setRenderMode] = useState<RenderMode>('wall-clock');
   const [focusedSpan, setFocusedSpan] = useState<ProcessedSpan | null>(null);
 
   // Tooltip state
@@ -62,7 +67,7 @@ export default function Home() {
   // Flame graph ref for zoom controls
   const flameGraphRef = useRef<FlameGraphHandle>(null);
 
-  // ─── Sync state to URL hash (debounced, compressed) ───────────────────────
+  // ─── Sync state to URL hash ───────────────────────────────────────────────
   useEffect(() => {
     const timer = setTimeout(() => {
       syncUrlState({ json: jsonInput, hz });
@@ -70,11 +75,15 @@ export default function Home() {
     return () => clearTimeout(timer);
   }, [jsonInput, hz]);
 
+  // Track whether we should auto-detect render mode (only on new JSON input)
+  const prevJsonRef = useRef<string>('');
+
   // ─── Process JSON ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (!jsonInput.trim()) {
       setFlameData(null);
       setJsonError(null);
+      prevJsonRef.current = '';
       return;
     }
 
@@ -82,14 +91,25 @@ export default function Home() {
       const parsed = JSON.parse(jsonInput);
       setJsonError(null);
 
-      const data = processFlameData(parsed, { hz, mode: 'time' });
+      // Auto-detect recommended render mode ONLY when JSON input changes (not on mode toggle)
+      if (jsonInput !== prevJsonRef.current) {
+        prevJsonRef.current = jsonInput;
+        const detection = detectRecommendedMode(parsed);
+        if (detection.hasScaled) {
+          setRenderMode('scaled');
+        } else if (detection.hasConcurrent) {
+          setRenderMode('wall-clock');
+        }
+      }
+
+      const data = processFlameData(parsed, { hz, mode: 'time', renderMode });
       setFlameData(data);
       setFocusedSpan(null);
     } catch (err) {
       setJsonError(err instanceof Error ? err.message : 'Invalid JSON');
       setFlameData(null);
     }
-  }, [jsonInput, hz]);
+  }, [jsonInput, hz, renderMode]);
 
   // ─── Handlers ──────────────────────────────────────────────────────────────
   const handleSpanClick = useCallback((span: ProcessedSpan) => {
@@ -122,12 +142,10 @@ export default function Home() {
   // ─── Keyboard shortcuts ────────────────────────────────────────────────────
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      // Escape: reset focus
       if (e.key === 'Escape') {
         setFocusedSpan(null);
         setSearchQuery('');
       }
-      // Cmd/Ctrl + F: focus search (when not in textarea)
       if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
         const active = document.activeElement;
         if (active?.tagName !== 'TEXTAREA') {
@@ -136,7 +154,6 @@ export default function Home() {
           searchInput?.focus();
         }
       }
-      // Cmd/Ctrl + B: toggle panel
       if ((e.metaKey || e.ctrlKey) && e.key === 'b') {
         e.preventDefault();
         setPanelOpen(prev => !prev);
@@ -208,9 +225,9 @@ export default function Home() {
       {/* Info Panel */}
       {showInfo && (
         <div className="px-4 py-3 border-b border-[#21262D] bg-[#161B22]">
-          <div className="max-w-3xl">
+          <div className="max-w-4xl">
             <h3 className="text-xs font-semibold text-[#E6EDF3] mb-2">How to use</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[11px] text-[#8B949E]">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-[11px] text-[#8B949E]">
               <div>
                 <p className="mb-1.5">
                   <span className="text-[#E6EDF3] font-medium">1.</span> Paste your telemetry JSON in the left panel
@@ -223,13 +240,28 @@ export default function Home() {
                 </p>
               </div>
               <div>
-                <p className="mb-1.5 font-medium text-[#00D4FF]">Async/Parallel Support:</p>
+                <p className="mb-1.5 font-medium text-[#00D4FF]">Render Modes:</p>
                 <p className="mb-1">
-                  Add <code className="px-1 py-0.5 rounded bg-[#21262D] text-[#E6EDF3] font-mono text-[10px]">"async": true</code> to
-                  parent spans to render children in parallel lanes.
+                  <span className="text-[#00D4FF] font-mono text-[10px]">Wall-Clock</span>
+                  <span className="text-[#6E7681]"> — True parallel durations. Children can overflow parent (to_dict).</span>
+                </p>
+                <p className="mb-1">
+                  <span className="text-[#FFB020] font-mono text-[10px]">Scaled</span>
+                  <span className="text-[#6E7681]"> — Children fit within parent. Hover for wall-clock values (to_scaled_dict).</span>
+                </p>
+              </div>
+              <div>
+                <p className="mb-1.5 font-medium text-[#00D4FF]">Concurrency Fields:</p>
+                <p className="mb-1">
+                  <code className="px-1 py-0.5 rounded bg-[#21262D] text-[#E6EDF3] font-mono text-[10px]">"concurrent": true</code>
+                  <span className="text-[#6E7681]"> — Profiler divergence detection</span>
+                </p>
+                <p className="mb-1">
+                  <code className="px-1 py-0.5 rounded bg-[#21262D] text-[#E6EDF3] font-mono text-[10px]">"blocking": true</code>
+                  <span className="text-[#6E7681]"> — Actively awaited child</span>
                 </p>
                 <p className="text-[10px] text-[#6E7681]">
-                  Children with overlapping timestamps are auto-detected as parallel.
+                  Also supports <code className="text-[#8B949E]">"async": true</code> and auto-detection of overlapping children.
                 </p>
               </div>
             </div>
@@ -246,7 +278,6 @@ export default function Home() {
                 https://domain/#hz=50&d=<span className="text-[#8B949E]">{'<gzip+base64url>'}</span>
               </code>
               <p className="mt-1.5">Click <span className="text-[#00D4FF]">Share URL</span> in the header to copy a shareable link with your current data.</p>
-              <p className="mt-0.5 text-[#6E7681]">Legacy format (<code className="text-[#8B949E]">?json=&hz=</code>) is also supported for backward compatibility.</p>
             </div>
           </div>
         </div>
@@ -284,6 +315,8 @@ export default function Home() {
                 onColorModeChange={setColorMode}
                 textAlign={textAlign}
                 onTextAlignChange={setTextAlign}
+                renderMode={renderMode}
+                onRenderModeChange={setRenderMode}
                 focusedSpanName={focusedSpan?.name || null}
                 onResetFocus={handleResetFocus}
                 totalDuration={flameData.totalDuration}
@@ -341,6 +374,7 @@ export default function Home() {
                 x={tooltipPos.x}
                 y={tooltipPos.y}
                 totalDuration={flameData.totalDuration}
+                renderMode={renderMode}
               />
             </>
           ) : (
@@ -399,6 +433,8 @@ export default function Home() {
                     {[
                       { label: 'Span Tree', desc: 'startTime + endTime' },
                       { label: 'Sample Tree', desc: 'value + children' },
+                      { label: 'to_dict()', desc: 'concurrent + wall-clock' },
+                      { label: 'to_scaled_dict()', desc: 'scaled + _wall_clock' },
                       { label: 'OpenTelemetry', desc: 'OTLP spans' },
                       { label: 'Flat Profile', desc: 'level + value + self' },
                     ].map(fmt => (

@@ -1,10 +1,12 @@
 /**
  * SpanTooltip — Frosted glass tooltip for span details
  * Design: Observatory dark console with glass-panel effect
+ * Shows wall-clock values and blocking/concurrent status
  */
 
 import { useEffect, useRef, useState } from "react";
 import type { ProcessedSpan } from "@/lib/flameEngine";
+import type { RenderMode } from "@/lib/flameEngine";
 import { formatDuration } from "@/lib/flameEngine";
 
 interface SpanTooltipProps {
@@ -12,9 +14,10 @@ interface SpanTooltipProps {
   x: number;
   y: number;
   totalDuration: number;
+  renderMode: RenderMode;
 }
 
-export default function SpanTooltip({ span, x, y, totalDuration }: SpanTooltipProps) {
+export default function SpanTooltip({ span, x, y, totalDuration, renderMode }: SpanTooltipProps) {
   const tooltipRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ left: 0, top: 0 });
 
@@ -28,7 +31,6 @@ export default function SpanTooltip({ span, x, y, totalDuration }: SpanTooltipPr
     let left = x + padding;
     let top = y + padding;
 
-    // Keep tooltip in viewport
     if (left + rect.width > window.innerWidth - padding) {
       left = x - rect.width - padding;
     }
@@ -43,6 +45,7 @@ export default function SpanTooltip({ span, x, y, totalDuration }: SpanTooltipPr
 
   const percentage = totalDuration > 0 ? (span.duration / totalDuration * 100) : 0;
   const selfPercentage = totalDuration > 0 ? (span.selfTime / totalDuration * 100) : 0;
+  const hasWallClock = span.wallClockValue > 0 && Math.abs(span.wallClockValue - span.duration) > 0.0001;
 
   return (
     <div
@@ -59,6 +62,13 @@ export default function SpanTooltip({ span, x, y, totalDuration }: SpanTooltipPr
         {span.name}
       </div>
 
+      {/* Render mode indicator */}
+      {renderMode === 'scaled' && (
+        <div className="mb-2 px-2 py-1 rounded bg-[#FFB020]/10 border border-[#FFB020]/20">
+          <span className="text-[10px] text-[#FFB020] font-medium">Scaled View</span>
+        </div>
+      )}
+
       {/* Timing details */}
       <div className="space-y-1.5">
         <div className="flex justify-between gap-6 text-[11px]">
@@ -67,6 +77,16 @@ export default function SpanTooltip({ span, x, y, totalDuration }: SpanTooltipPr
             {formatDuration(span.duration)}
           </span>
         </div>
+
+        {/* Show wall-clock if different from duration (scaled mode) */}
+        {hasWallClock && (
+          <div className="flex justify-between gap-6 text-[11px]">
+            <span className="text-[#8B949E]">Wall-Clock</span>
+            <span className="font-mono text-[#FFB020] font-medium">
+              {formatDuration(span.wallClockValue)}
+            </span>
+          </div>
+        )}
 
         <div className="flex justify-between gap-6 text-[11px]">
           <span className="text-[#8B949E]">Self Time</span>
@@ -119,14 +139,29 @@ export default function SpanTooltip({ span, x, y, totalDuration }: SpanTooltipPr
           </div>
         )}
 
-        {(span.isAsync || span.isParallel) && (
+        {/* Concurrency / Async / Blocking indicators */}
+        {(span.isAsync || span.isParallel || span.isConcurrent) && (
           <div className="mt-1.5 pt-1.5 border-t border-[#21262D]">
             <div className="flex items-center gap-1.5 text-[11px]">
               <span className="inline-block w-2 h-2 rounded-full bg-[#00D4FF]" />
               <span className="text-[#00D4FF] font-medium">
-                {span.isAsync ? 'Async' : 'Parallel'} Execution
+                {span.isConcurrent ? 'Concurrent' : span.isAsync ? 'Async' : 'Parallel'} Execution
               </span>
             </div>
+          </div>
+        )}
+
+        {span.isBlocking && (
+          <div className="flex items-center gap-1.5 text-[11px] mt-1">
+            <span className="inline-block w-2 h-2 rounded-full bg-[#FF6B35]" />
+            <span className="text-[#FF6B35] font-medium">Blocking (awaited)</span>
+          </div>
+        )}
+
+        {!span.isBlocking && (span.isAsync || span.isConcurrent) && span.children.length === 0 && (
+          <div className="flex items-center gap-1.5 text-[11px] mt-1">
+            <span className="inline-block w-2 h-2 rounded-full bg-[#8B949E]" />
+            <span className="text-[#8B949E] font-medium">Fire-and-forget</span>
           </div>
         )}
       </div>

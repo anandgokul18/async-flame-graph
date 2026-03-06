@@ -12,3 +12,10 @@
 - [ ] Keep backward compat with old ?json= query param links
 - [ ] Update Share URL button to use new compressed format
 - [ ] Update help text with new URL format
+- [ ] Support `concurrent=true` field (auto-detect parallel children, replaces manual `async: true`)
+- [ ] Support `blocking` field on children for visual differentiation
+- [ ] Support `_wall_clock` field from to_scaled_dict() mode
+- [ ] Add toggle to switch between wall-clock (to_dict) and scaled (to_scaled_dict) rendering
+- [ ] In wall-clock mode: children can overflow parent width (show true durations)
+- [ ] In scaled mode: children fit within parent width, tooltip shows _wall_clock values
+- [ ] Update sample data to include both formats for testing

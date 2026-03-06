@@ -5,12 +5,20 @@
  * Key feature: Properly handles async/parallel children by using wall-clock time
  * instead of summing child durations.
  * 
- * Supports two JSON formats:
- * 1. Span-based (with startTime/endTime or duration)
- * 2. Sample-based (with value/samples, converted via Hz)
+ * Supports two rendering modes:
+ *   1. Wall-Clock (to_dict): children show true wall-clock values, can overflow parent
+ *   2. Scaled (to_scaled_dict): children proportionally scaled to fit within parent
+ * 
+ * Supports JSON formats:
+ *   1. Span-based (with startTime/endTime or duration)
+ *   2. Sample-based (with value/samples, converted via Hz)
+ *   3. OpenTelemetry / Jaeger
+ *   4. Flat profile (Grafana-style)
  */
 
 // ─── Types ───────────────────────────────────────────────────────────────────
+
+export type RenderMode = 'wall-clock' | 'scaled';
 
 export interface RawSpan {
   name: string;
@@ -21,8 +29,12 @@ export interface RawSpan {
   samples?: number;
   self?: number;
   children?: RawSpan[];
+  // Async / concurrency markers
   async?: boolean;
   parallel?: boolean;
+  concurrent?: boolean;       // from profiler's divergence detection
+  blocking?: boolean;         // whether child is actively awaited
+  _wall_clock?: number;       // original wall-clock value from to_scaled_dict()
   // OpenTelemetry-style fields
   operationName?: string;
   spanID?: string;
@@ -47,6 +59,10 @@ export interface ProcessedSpan {
   children: ProcessedSpan[];
   isAsync: boolean;
   isParallel: boolean;
+  isConcurrent: boolean;   // from profiler concurrent=true
+  isBlocking: boolean;     // from profiler blocking field
+  wallClockValue: number;  // original _wall_clock value (for scaled mode)
+  scaledValue: number;     // the scaled value used for rendering width
   // Visual layout
   x: number;            // normalized x position (0-1)
   width: number;        // normalized width (0-1)
@@ -68,6 +84,7 @@ export interface FlameData {
 export interface ProcessingOptions {
   hz: number;
   mode: 'time' | 'samples';
+  renderMode: RenderMode;
 }
 
 // ─── Color Generation ────────────────────────────────────────────────────────
@@ -98,7 +115,6 @@ function hashString(str: string): number {
 }
 
 export function getSpanColor(name: string, selfTimeRatio: number): string {
-  // Hot paths get warm colors, cold paths get cool colors
   if (selfTimeRatio > 0.3) {
     return COLOR_PALETTES.warm[hashString(name) % COLOR_PALETTES.warm.length];
   } else if (selfTimeRatio > 0.1) {
@@ -111,8 +127,7 @@ export function getSpanColor(name: string, selfTimeRatio: number): string {
 
 export function getPackageColor(name: string): string {
   const allColors = [...COLOR_PALETTES.warm, ...COLOR_PALETTES.cool];
-  // Extract package/namespace from name
-  const parts = name.split(/[./\\:]/);
+  const parts = name.split(/[./\\:@]/);
   const pkg = parts.length > 1 ? parts.slice(0, -1).join('.') : name;
   return allColors[hashString(pkg) % allColors.length];
 }
@@ -167,6 +182,24 @@ function detectFormat(data: unknown): DataFormat {
   return 'unknown';
 }
 
+// ─── Detect if data uses to_scaled_dict format ──────────────────────────────
+
+function hasScaledDictFields(raw: RawSpan): boolean {
+  if (raw._wall_clock !== undefined) return true;
+  if (raw.children) {
+    return raw.children.some(c => hasScaledDictFields(c));
+  }
+  return false;
+}
+
+function hasConcurrentField(raw: RawSpan): boolean {
+  if (raw.concurrent === true) return true;
+  if (raw.children) {
+    return raw.children.some(c => hasConcurrentField(c));
+  }
+  return false;
+}
+
 // ─── Processing Functions ────────────────────────────────────────────────────
 
 function processSpanTree(
@@ -194,7 +227,9 @@ function processSpanTree(
     endTime = startTime + raw.duration;
   } else if (raw.value !== undefined || raw.samples !== undefined) {
     // Sample-based: convert to time using Hz
-    const samples = raw.value ?? raw.samples ?? 0;
+    // In wall-clock mode, prefer _wall_clock over value if available
+    const useWallClock = options.renderMode === 'wall-clock' && raw._wall_clock !== undefined;
+    const samples = useWallClock ? raw._wall_clock! : (raw.value ?? raw.samples ?? 0);
     const duration = options.hz > 0 ? samples / options.hz : samples;
     startTime = parentStart;
     endTime = startTime + duration;
@@ -205,28 +240,32 @@ function processSpanTree(
 
   const duration = endTime - startTime;
 
+  // Detect concurrency: concurrent=true (profiler) OR async=true (manual) OR parallel=true
+  const isConcurrent = raw.concurrent === true || raw.async === true || raw.parallel === true;
+  const isBlocking = raw.blocking === true;
+  const wallClockValue = raw._wall_clock !== undefined
+    ? (options.hz > 0 ? raw._wall_clock / options.hz : raw._wall_clock)
+    : duration;
+  const scaledValue = duration;
+
   // Process children
-  const isAsync = raw.async === true || raw.parallel === true;
   const children: ProcessedSpan[] = [];
 
   if (raw.children && raw.children.length > 0) {
-    if (isAsync) {
-      // ASYNC/PARALLEL: Children start at the same time as parent
-      // Parent duration = max(child durations), not sum
+    if (isConcurrent) {
+      // CONCURRENT/ASYNC: Children start at the same time as parent
       for (const child of raw.children) {
         const processed = processSpanTree(child, options, depth + 1, startTime, id);
         children.push(processed);
       }
     } else {
       // SEQUENTIAL: Children are laid out one after another
-      // Check if children have their own timing
       const childrenHaveTiming = raw.children.some(c =>
         (c.startTime !== undefined && c.endTime !== undefined) ||
         (c.startTimeUnixNano !== undefined && c.endTimeUnixNano !== undefined)
       );
 
       if (childrenHaveTiming) {
-        // Use children's own timing
         for (const child of raw.children) {
           const processed = processSpanTree(child, options, depth + 1, startTime, id);
           children.push(processed);
@@ -243,7 +282,7 @@ function processSpanTree(
     }
 
     // Auto-detect parallel: if children overlap in time, they're parallel
-    if (!isAsync && children.length > 1) {
+    if (!isConcurrent && children.length > 1) {
       const sorted = [...children].sort((a, b) => a.startTime - b.startTime);
       let hasOverlap = false;
       for (let i = 1; i < sorted.length; i++) {
@@ -253,7 +292,6 @@ function processSpanTree(
         }
       }
       if (hasOverlap) {
-        // Mark as parallel
         for (const child of children) {
           (child as ProcessedSpan).isParallel = true;
         }
@@ -262,10 +300,8 @@ function processSpanTree(
   }
 
   // Calculate self time
-  // For async/parallel spans, children overlap, so we use max instead of sum
   let childCoveredTime: number;
-  if (isAsync && children.length > 0) {
-    // For async: children run in parallel, so covered time = max(endTime) - min(startTime)
+  if (isConcurrent && children.length > 0) {
     const minStart = Math.min(...children.map(c => c.startTime));
     const maxEnd = Math.max(...children.map(c => c.endTime));
     childCoveredTime = maxEnd - minStart;
@@ -285,8 +321,12 @@ function processSpanTree(
     selfTime,
     depth,
     children,
-    isAsync,
+    isAsync: isConcurrent,
     isParallel: false,
+    isConcurrent,
+    isBlocking: isBlocking,
+    wallClockValue,
+    scaledValue,
     x: 0,
     width: 0,
     y: depth,
@@ -299,7 +339,6 @@ function processSpanTree(
 }
 
 function processOtelSpans(data: unknown, options: ProcessingOptions): ProcessedSpan {
-  // Handle OTLP export format
   let spans: RawSpan[] = [];
 
   if (Array.isArray(data)) {
@@ -320,7 +359,6 @@ function processOtelSpans(data: unknown, options: ProcessingOptions): ProcessedS
     }
   }
 
-  // Build parent-child relationships from references
   const spanMap = new Map<string, RawSpan>();
   const childMap = new Map<string, RawSpan[]>();
 
@@ -366,10 +404,8 @@ function processOtelSpans(data: unknown, options: ProcessingOptions): ProcessedS
 }
 
 function processFlatProfile(data: Array<{ level: number; value: number; self: number; label: string }>, options: ProcessingOptions): ProcessedSpan {
-  // Grafana-style flat profile format
   if (data.length === 0) return createEmptySpan();
 
-  // Build tree from flat format using depth-first ordering
   const stack: ProcessedSpan[] = [];
   let root: ProcessedSpan | undefined;
 
@@ -390,13 +426,16 @@ function processFlatProfile(data: Array<{ level: number; value: number; self: nu
       children: [],
       isAsync: false,
       isParallel: false,
+      isConcurrent: false,
+      isBlocking: false,
+      wallClockValue: duration,
+      scaledValue: duration,
       x: 0,
       width: 0,
       y: row.level,
       color: '',
     };
 
-    // Pop stack until we find the parent
     while (stack.length > 0 && stack[stack.length - 1].depth >= row.level) {
       stack.pop();
     }
@@ -426,6 +465,10 @@ function createEmptySpan(): ProcessedSpan {
     children: [],
     isAsync: false,
     isParallel: false,
+    isConcurrent: false,
+    isBlocking: false,
+    wallClockValue: 0,
+    scaledValue: 0,
     x: 0,
     width: 0,
     y: 0,
@@ -435,7 +478,11 @@ function createEmptySpan(): ProcessedSpan {
 
 // ─── Layout Calculation ──────────────────────────────────────────────────────
 
-function calculateLayout(span: ProcessedSpan, totalDuration: number, offsetX: number = 0): void {
+/**
+ * Wall-Clock layout: children of concurrent parents are rendered in parallel lanes.
+ * Children can visually overflow the parent width (true wall-clock representation).
+ */
+function calculateLayoutWallClock(span: ProcessedSpan, totalDuration: number): void {
   if (totalDuration <= 0) {
     span.x = 0;
     span.width = 1;
@@ -444,32 +491,90 @@ function calculateLayout(span: ProcessedSpan, totalDuration: number, offsetX: nu
     span.width = span.duration / totalDuration;
   }
 
-  // Calculate color based on self-time ratio
   const selfRatio = span.duration > 0 ? span.selfTime / span.duration : 0;
   span.color = getSpanColor(span.name, selfRatio);
 
-  // Layout children
   if (span.children.length > 0) {
-    // Check if children are parallel (overlapping times)
-    const isParallelGroup = span.isAsync || span.children.some(c => c.isParallel);
+    const isParallelGroup = span.isAsync || span.isConcurrent || span.children.some(c => c.isParallel);
 
     if (isParallelGroup) {
-      // Parallel children: each gets its own visual lane
-      // Assign separate depth rows so they don't overlap visually
       let laneOffset = 0;
       for (let i = 0; i < span.children.length; i++) {
         const child = span.children[i];
-        // Shift depth for each parallel child to create separate lanes
         adjustDepth(child, laneOffset);
-        calculateLayout(child, totalDuration);
-        // Calculate how many depth levels this child tree uses
+        calculateLayoutWallClock(child, totalDuration);
         const childMaxDepth = getSubtreeDepth(child);
         laneOffset += (childMaxDepth - child.depth + 1);
       }
     } else {
-      // Sequential children
       for (const child of span.children) {
-        calculateLayout(child, totalDuration);
+        calculateLayoutWallClock(child, totalDuration);
+      }
+    }
+  }
+}
+
+/**
+ * Scaled layout: children of concurrent parents are proportionally scaled
+ * to fit within the parent's width. The _wall_clock values are preserved
+ * in wallClockValue for tooltip display.
+ * 
+ * This matches the to_scaled_dict() behavior:
+ *   child_scale = parent.value / sum(children.value)
+ *   Each child width = child.value * child_scale
+ */
+function calculateLayoutScaled(span: ProcessedSpan, totalDuration: number): void {
+  if (totalDuration <= 0) {
+    span.x = 0;
+    span.width = 1;
+  } else {
+    span.x = span.startTime / totalDuration;
+    span.width = span.duration / totalDuration;
+  }
+
+  const selfRatio = span.duration > 0 ? span.selfTime / span.duration : 0;
+  span.color = getSpanColor(span.name, selfRatio);
+
+  if (span.children.length > 0) {
+    const isParallelGroup = span.isAsync || span.isConcurrent || span.children.some(c => c.isParallel);
+
+    if (isParallelGroup) {
+      // Scale children to fit within parent width
+      const childSum = span.children.reduce((sum, c) => sum + c.duration, 0);
+      const scale = childSum > 0 ? span.duration / childSum : 1;
+
+      // Lay out children sequentially within parent's width (scaled to fit)
+      let currentX = span.startTime;
+      for (const child of span.children) {
+        const scaledDuration = child.duration * scale;
+        // Preserve wall-clock for tooltip
+        child.wallClockValue = child.duration;
+        // Override start/end for scaled layout
+        const origStart = child.startTime;
+        const origEnd = child.endTime;
+        child.startTime = currentX;
+        child.endTime = currentX + scaledDuration;
+        child.scaledValue = scaledDuration;
+        // Recursively layout (children of this child use their own proportions)
+        calculateLayoutScaled(child, totalDuration);
+        // Restore original times for tooltip display
+        child.startTime = origStart;
+        child.endTime = origEnd;
+        // But keep the scaled x/width
+        child.x = currentX / totalDuration;
+        child.width = scaledDuration / totalDuration;
+        currentX += scaledDuration;
+      }
+
+      // In scaled mode, children are sequential (no lane offsets needed)
+      // But we still need to set depth correctly
+      for (const child of span.children) {
+        // All children at same depth (sequential in scaled view)
+        // No lane offset needed
+      }
+    } else {
+      for (const child of span.children) {
+        calculateLayoutScaled(child, totalDuration);
       }
     }
   }
@@ -522,7 +627,6 @@ export function processFlameData(rawJson: unknown, options: ProcessingOptions): 
       root = processFlatProfile(rawJson as Array<{ level: number; value: number; self: number; label: string }>, options);
       break;
     default:
-      // Try to parse as a tree anyway
       if (typeof rawJson === 'object' && rawJson !== null) {
         root = processSpanTree(rawJson as RawSpan, options);
       } else {
@@ -531,7 +635,13 @@ export function processFlameData(rawJson: unknown, options: ProcessingOptions): 
   }
 
   const totalDuration = root.duration;
-  calculateLayout(root, totalDuration);
+
+  // Apply layout based on render mode
+  if (options.renderMode === 'scaled') {
+    calculateLayoutScaled(root, totalDuration);
+  } else {
+    calculateLayoutWallClock(root, totalDuration);
+  }
 
   const allSpans = collectAllSpans(root);
   const maxDepth = calculateMaxDepth(root);
@@ -539,7 +649,7 @@ export function processFlameData(rawJson: unknown, options: ProcessingOptions): 
   // Group async spans
   const asyncGroups = new Map<string, ProcessedSpan[]>();
   for (const span of allSpans) {
-    if (span.isAsync || span.isParallel) {
+    if (span.isAsync || span.isParallel || span.isConcurrent) {
       const groupKey = span.parentId || 'root';
       if (!asyncGroups.has(groupKey)) {
         asyncGroups.set(groupKey, []);
@@ -554,6 +664,22 @@ export function processFlameData(rawJson: unknown, options: ProcessingOptions): 
     maxDepth,
     allSpans,
     asyncGroups,
+  };
+}
+
+// ─── Auto-detect recommended render mode ─────────────────────────────────────
+
+export function detectRecommendedMode(rawJson: unknown): { hasScaled: boolean; hasConcurrent: boolean; recommended: RenderMode } {
+  if (!rawJson || typeof rawJson !== 'object') {
+    return { hasScaled: false, hasConcurrent: false, recommended: 'wall-clock' };
+  }
+  const raw = rawJson as RawSpan;
+  const hasScaled = hasScaledDictFields(raw);
+  const hasConcurrent = hasConcurrentField(raw);
+  return {
+    hasScaled,
+    hasConcurrent,
+    recommended: hasScaled ? 'scaled' : 'wall-clock',
   };
 }
 
@@ -726,6 +852,65 @@ export function generateSampleDataSamples(): RawSpan {
         children: [
           { name: "serialize", value: 30 },
           { name: "compress", value: 20 },
+        ]
+      }
+    ]
+  };
+}
+
+/**
+ * Sample data matching the profiler's to_dict() format (wall-clock, concurrent=true)
+ * Children sum > parent (200+300+400=900 vs parent=400) — true parallelism
+ */
+export function generateSampleWallClock(): RawSpan {
+  return {
+    name: "root@",
+    value: 400,
+    children: [
+      {
+        name: "invoke_analect@confucius.py",
+        value: 400,
+        children: [
+          {
+            name: "gather@asyncio",
+            value: 400,
+            concurrent: true,
+            children: [
+              { name: "do_retrieval@tools.py", value: 200, blocking: true },
+              { name: "do_llm_call@llm.py", value: 300, blocking: true },
+              { name: "do_tool_exec@tools.py", value: 400, blocking: false },
+            ]
+          }
+        ]
+      }
+    ]
+  };
+}
+
+/**
+ * Sample data matching the profiler's to_scaled_dict() format (proportionally scaled)
+ * Children fit within parent, _wall_clock preserves originals
+ * Scale: 400/900 ≈ 0.44
+ */
+export function generateSampleScaled(): RawSpan {
+  return {
+    name: "root@",
+    value: 400,
+    children: [
+      {
+        name: "invoke_analect@confucius.py",
+        value: 400,
+        children: [
+          {
+            name: "gather@asyncio",
+            value: 400,
+            concurrent: true,
+            children: [
+              { name: "do_retrieval@tools.py", value: 88, _wall_clock: 200, blocking: true },
+              { name: "do_llm_call@llm.py", value: 133, _wall_clock: 300, blocking: true },
+              { name: "do_tool_exec@tools.py", value: 177, _wall_clock: 400, blocking: false },
+            ]
+          }
         ]
       }
     ]
