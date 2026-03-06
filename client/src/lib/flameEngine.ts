@@ -505,6 +505,26 @@ function tagParallelGroups(span: ProcessedSpan): void {
   }
 }
 
+// ─── Default Active Index (largest child) ──────────────────────────────────
+
+/**
+ * Returns the index of the child with the largest duration.
+ * Used as the default active page for paper-stack view so the most
+ * significant child is shown first instead of the smallest.
+ */
+function getDefaultActiveIndex(children: ProcessedSpan[]): number {
+  if (children.length === 0) return 0;
+  let maxIdx = 0;
+  let maxDuration = children[0].duration;
+  for (let i = 1; i < children.length; i++) {
+    if (children[i].duration > maxDuration) {
+      maxDuration = children[i].duration;
+      maxIdx = i;
+    }
+  }
+  return maxIdx;
+}
+
 // ─── Layout Calculation ──────────────────────────────────────────────────────
 
 /**
@@ -535,7 +555,9 @@ function calculateLayoutWallClock(
     if (isParallelGroup && span.children.length > 1) {
       // Paper-stack mode: only layout the active child
       const groupId = span.id;
-      const activeIndex = activePages?.get(groupId) ?? 0;
+      // Default to the largest child (by duration) instead of index 0
+      const defaultIndex = getDefaultActiveIndex(span.children);
+      const activeIndex = activePages?.has(groupId) ? activePages.get(groupId)! : defaultIndex;
       const safeIndex = Math.min(activeIndex, span.children.length - 1);
 
       // Only layout the active child — others stay at x=0, width=0 (hidden)
@@ -584,6 +606,7 @@ function calculateLayoutScaled(
   totalDuration: number,
   parentX?: number,
   parentWidth?: number,
+  activePages?: Map<string, number>,
 ): void {
   // If parentX/parentWidth are provided, this span's x/width were already set by the caller.
   // Otherwise compute from startTime/duration (only for the root).
@@ -604,29 +627,38 @@ function calculateLayoutScaled(
 
   const isParallelGroup = span.isAsync || span.isConcurrent || span.children.some(c => c.isParallel);
 
-  // Sum of all children durations (used for proportional scaling)
-  const childSum = span.children.reduce((sum, c) => sum + c.duration, 0);
+  if (isParallelGroup && span.children.length > 1) {
+    // Paper-stack mode: only layout the active child, hide others
+    const groupId = span.id;
+    // Default to the largest child (by duration) instead of index 0
+    const defaultIndex = getDefaultActiveIndex(span.children);
+    const activeIndex = activePages?.has(groupId) ? activePages.get(groupId)! : defaultIndex;
+    const safeIndex = Math.min(activeIndex, span.children.length - 1);
 
-  if (isParallelGroup) {
-    // Concurrent children: scale them to fit sequentially within parent's width
-    const scale = childSum > 0 ? span.duration / childSum : 1;
-    let currentXNorm = span.x; // normalized x position
-
-    for (const child of span.children) {
-      const scaledWidthNorm = (child.duration * scale) / totalDuration;
-      // Preserve wall-clock for tooltip
-      child.wallClockValue = child.duration;
-      child.scaledValue = child.duration * scale;
-      // Set visual position
-      child.x = currentXNorm;
-      child.width = scaledWidthNorm;
-      // Recursively layout grandchildren within this child's visual bounds
-      calculateLayoutScaled(child, totalDuration, child.x, child.width);
-      currentXNorm += scaledWidthNorm;
+    for (let i = 0; i < span.children.length; i++) {
+      const child = span.children[i];
+      if (i === safeIndex) {
+        // Active child gets the full parent width
+        child.wallClockValue = child.duration;
+        child.scaledValue = child.duration;
+        child.x = span.x;
+        child.width = span.width;
+        calculateLayoutScaled(child, totalDuration, child.x, child.width, activePages);
+      } else {
+        hideSubtree(child);
+      }
     }
+  } else if (isParallelGroup && span.children.length === 1) {
+    // Single concurrent child: give it the full parent width
+    const child = span.children[0];
+    child.wallClockValue = child.duration;
+    child.scaledValue = child.duration;
+    child.x = span.x;
+    child.width = span.width;
+    calculateLayoutScaled(child, totalDuration, child.x, child.width, activePages);
   } else {
     // Sequential children: lay out proportionally within parent's visual bounds
-    // Each child gets width proportional to its duration relative to siblings
+    const childSum = span.children.reduce((sum, c) => sum + c.duration, 0);
     if (childSum <= 0) {
       // All zero-duration children: distribute evenly
       const evenWidth = span.width / span.children.length;
@@ -634,7 +666,7 @@ function calculateLayoutScaled(
       for (const child of span.children) {
         child.x = currentXNorm;
         child.width = evenWidth;
-        calculateLayoutScaled(child, totalDuration, child.x, child.width);
+        calculateLayoutScaled(child, totalDuration, child.x, child.width, activePages);
         currentXNorm += evenWidth;
       }
     } else {
@@ -646,7 +678,7 @@ function calculateLayoutScaled(
         const childWidthNorm = childProportion * span.width;
         child.x = currentXNorm;
         child.width = childWidthNorm;
-        calculateLayoutScaled(child, totalDuration, child.x, child.width);
+        calculateLayoutScaled(child, totalDuration, child.x, child.width, activePages);
         currentXNorm += childWidthNorm;
       }
     }
@@ -714,7 +746,7 @@ export function processFlameData(rawJson: unknown, options: ProcessingOptions): 
 
   // Apply layout based on render mode
   if (options.renderMode === 'scaled') {
-    calculateLayoutScaled(root, totalDuration);
+    calculateLayoutScaled(root, totalDuration, undefined, undefined, options.activeParallelPages);
   } else {
     calculateLayoutWallClock(root, totalDuration, options.activeParallelPages);
   }

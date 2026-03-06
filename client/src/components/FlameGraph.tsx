@@ -6,7 +6,12 @@
  * Time axis shows seconds (wall-clock time)
  * 
  * Paper-Stack: Parallel children are shown one at a time with a visual
- * stack indicator. Click the HTML overlay badge to cycle through siblings.
+ * stack indicator. Badge is placed on the PARENT bar (the concurrent node)
+ * to ensure it's always visible regardless of child size.
+ * Click the HTML overlay badge to cycle through siblings.
+ * 
+ * DPR-aware: Canvas buffer is scaled by devicePixelRatio for crisp rendering
+ * on retina/HiDPI displays.
  */
 
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, forwardRef } from "react";
@@ -92,6 +97,7 @@ function getHitSpan(
   const focusX = focusedSpan ? focusedSpan.x : 0;
   const focusW = focusedSpan ? focusedSpan.width : 1;
 
+  // Use CSS-pixel coordinates (not DPR-scaled) for hit detection
   const sorted = [...spans].sort((a, b) => b.depth - a.depth);
 
   for (const span of sorted) {
@@ -214,6 +220,7 @@ interface BadgeInfo {
   totalCount: number;
   x: number;
   y: number;
+  activeChildName: string;
 }
 
 // ─── Main Component ──────────────────────────────────────────────────────────
@@ -238,13 +245,16 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
   const animFrameRef = useRef<number>(0);
   const [badges, setBadges] = useState<BadgeInfo[]>([]);
 
-  // Calculate canvas height based on max depth
+  // Get device pixel ratio for crisp rendering
+  const dpr = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1;
+
+  // Calculate canvas height based on max depth (CSS pixels)
   const canvasHeight = useMemo(() => {
     return TIMELINE_HEIGHT + PADDING_TOP + (data.maxDepth + 1) * (ROW_HEIGHT + ROW_GAP) + 20;
   }, [data.maxDepth]);
 
-  // Actual pixel height for canvas buffer (match CSS height)
-  const actualHeight = Math.max(canvasSize.height, canvasHeight);
+  // CSS pixel height
+  const cssHeight = Math.max(canvasSize.height, canvasHeight);
 
   // Resize observer
   useEffect(() => {
@@ -280,7 +290,7 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
     return matches;
   }, [visibleSpans, searchQuery]);
 
-  // ─── Canvas Rendering ─────────────────────────────────────────────────────
+  // ─── Canvas Rendering (DPR-aware) ────────────────────────────────────────
 
   const render = useCallback(() => {
     const canvas = canvasRef.current;
@@ -288,8 +298,21 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    // Set canvas buffer to DPR-scaled size
+    const bufferW = Math.round(canvasSize.width * dpr);
+    const bufferH = Math.round(cssHeight * dpr);
+
+    if (canvas.width !== bufferW || canvas.height !== bufferH) {
+      canvas.width = bufferW;
+      canvas.height = bufferH;
+    }
+
+    // Scale all drawing by DPR so we draw in CSS-pixel coordinates
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // Use CSS-pixel dimensions for all drawing
     const w = canvasSize.width;
-    const h = actualHeight;
+    const h = cssHeight;
 
     // Clear
     ctx.clearRect(0, 0, w, h);
@@ -302,8 +325,10 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
     const focusX = focusedSpan ? focusedSpan.x : 0;
     const focusW = focusedSpan ? focusedSpan.width : 1;
 
-    // Collect badge positions
+    // Collect badge positions — we place badges on PARENT bars (concurrent nodes)
     const newBadges: BadgeInfo[] = [];
+    // Track which groupIds we've already added badges for (to avoid duplicates)
+    const badgeGroupIds = new Set<string>();
 
     // Draw spans
     for (const span of visibleSpans) {
@@ -314,19 +339,28 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
       const pixelW = Math.max(MIN_BAR_WIDTH, normalizedW * viewState.zoom * w);
       const pixelY = TIMELINE_HEIGHT + PADDING_TOP + span.depth * (ROW_HEIGHT + ROW_GAP);
 
-      // Draw paper-stack background layers BEFORE the main bar
+      // Check if this span is a concurrent PARENT (has children tagged with parallelGroupId = this span's id)
+      const isParallelParent = span.isConcurrent && span.children.length > 1 &&
+        span.children.some(c => c.parallelGroupId === span.id);
+
+      // Draw paper-stack background layers on the PARENT bar
+      if (isParallelParent && pixelW > 30) {
+        drawPaperStackLayers(ctx, pixelX, pixelY, pixelW, span.children.length);
+      }
+
+      // Also draw paper-stack layers on child if it's wide enough (for visual continuity)
       if (
         span.parallelGroupId !== undefined &&
         span.parallelSiblingCount !== undefined &&
         span.parallelSiblingCount > 1 &&
         span.parallelIndex !== undefined &&
-        pixelW > 30
+        pixelW > 60
       ) {
         drawPaperStackLayers(ctx, pixelX, pixelY, pixelW, span.parallelSiblingCount);
       }
 
       // Bar color
-      let barColor = span.color;
+      const barColor = span.color;
       const isHovered = hoveredSpan?.id === span.id;
       const isSearchMatch = searchQuery && searchMatches.has(span.id);
       const isSearchDimmed = searchQuery && !searchMatches.has(span.id);
@@ -351,29 +385,33 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
       ctx.lineWidth = isHovered || isSearchMatch ? 2 : 1;
       ctx.stroke();
 
-      // Async indicator
+      // Async indicator (cyan bottom bar on concurrent parents)
       if (span.isConcurrent) {
         ctx.fillStyle = 'rgba(0, 212, 255, 0.7)';
         ctx.fillRect(pixelX, pixelY + ROW_HEIGHT - 3, pixelW, 3);
       }
 
-      // Collect badge info for HTML overlay
-      if (
-        span.parallelGroupId !== undefined &&
-        span.parallelSiblingCount !== undefined &&
-        span.parallelSiblingCount > 1 &&
-        span.parallelIndex !== undefined &&
-        pixelW > 30
-      ) {
-        const activeIdx = activeParallelPages.get(span.parallelGroupId) ?? 0;
+      // Collect badge info for HTML overlay — placed on the PARENT bar
+      if (isParallelParent && pixelW > 30 && !badgeGroupIds.has(span.id)) {
+        const groupId = span.id;
+        // Default to largest child (matching engine logic)
+        const defaultIdx = span.children.reduce((maxI, c, i, arr) => c.duration > arr[maxI].duration ? i : maxI, 0);
+        const activeIdx = activeParallelPages.has(groupId) ? activeParallelPages.get(groupId)! : defaultIdx;
+        const safeIdx = Math.min(activeIdx, span.children.length - 1);
+        const activeChild = span.children[safeIdx];
+        badgeGroupIds.add(groupId);
         newBadges.push({
-          groupId: span.parallelGroupId,
+          groupId,
           activeIndex: activeIdx,
-          totalCount: span.parallelSiblingCount,
+          totalCount: span.children.length,
           x: pixelX + pixelW - 40,
           y: pixelY + 3,
+          activeChildName: activeChild ? activeChild.name : '',
         });
       }
+
+      // Determine if this span has a badge on it (for text truncation)
+      const hasBadgeOnThisSpan = isParallelParent && pixelW > 30;
 
       // Text label
       if (pixelW > 20) {
@@ -384,11 +422,7 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
 
         const textY = pixelY + ROW_HEIGHT / 2;
         const textX = pixelX + 4;
-        const hasBadge = span.parallelGroupId !== undefined &&
-          span.parallelSiblingCount !== undefined &&
-          span.parallelSiblingCount > 1 &&
-          pixelW > 30;
-        const badgeReserve = hasBadge ? 50 : 0;
+        const badgeReserve = hasBadgeOnThisSpan ? 50 : 0;
         const maxTextWidth = pixelW - 8 - badgeReserve;
 
         if (maxTextWidth > 20) {
@@ -415,7 +449,7 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
     }
 
     setBadges(newBadges);
-  }, [canvasSize, actualHeight, data, viewState, visibleSpans, hoveredSpan, searchQuery, searchMatches, focusedSpan, activeParallelPages]);
+  }, [canvasSize, cssHeight, dpr, data, viewState, visibleSpans, hoveredSpan, searchQuery, searchMatches, focusedSpan, activeParallelPages]);
 
   // Render on state change
   useEffect(() => {
@@ -424,17 +458,16 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
     return () => cancelAnimationFrame(animFrameRef.current);
   }, [render]);
 
-  // ─── Event Handlers ────────────────────────────────────────────────────────
+  // ─── Event Handlers (all in CSS-pixel coordinates) ────────────────────────
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    const mouseX = (e.clientX - rect.left) * scaleX;
-    const mouseY = (e.clientY - rect.top) * scaleY;
+    // Convert client coords to CSS-pixel coords (NOT canvas buffer coords)
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
 
     if (isDragging.current) {
       const dx = (e.clientX - dragStart.current.x) / canvasSize.width;
@@ -468,10 +501,9 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
         const canvas = canvasRef.current;
         if (!canvas) return;
         const rect = canvas.getBoundingClientRect();
-        const scaleX = canvas.width / rect.width;
-        const scaleY = canvas.height / rect.height;
-        const mouseX = (e.clientX - rect.left) * scaleX;
-        const mouseY = (e.clientY - rect.top) * scaleY;
+        // CSS-pixel coords
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
 
         const hit = getHitSpan(
           visibleSpans, mouseX, mouseY, viewState, canvasSize.width, focusedSpan
@@ -529,11 +561,11 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
     <div ref={containerRef} className="w-full h-full relative" style={{ overflow: 'auto' }}>
       <canvas
         ref={canvasRef}
-        width={canvasSize.width}
-        height={actualHeight}
+        width={Math.round(canvasSize.width * dpr)}
+        height={Math.round(cssHeight * dpr)}
         style={{
           width: canvasSize.width,
-          height: actualHeight,
+          height: cssHeight,
           display: 'block',
         }}
         onMouseMove={handleMouseMove}
@@ -541,7 +573,7 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseLeave}
       />
-      {/* HTML overlay badges for paper-stack cycling — much more reliable than canvas hit detection */}
+      {/* HTML overlay badges for paper-stack cycling — placed on PARENT bars */}
       {badges.map((badge) => (
         <button
           key={badge.groupId}
@@ -576,7 +608,7 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
             (e.currentTarget as HTMLElement).style.transform = 'scale(1)';
             (e.currentTarget as HTMLElement).style.background = 'rgba(0, 212, 255, 0.9)';
           }}
-          title={`Click to cycle through ${badge.totalCount} parallel tasks (${badge.activeIndex + 1}/${badge.totalCount})`}
+          title={`Click to cycle through ${badge.totalCount} parallel tasks (${badge.activeIndex + 1}/${badge.totalCount})\nActive: ${badge.activeChildName}`}
         >
           {badge.activeIndex + 1}/{badge.totalCount}
         </button>

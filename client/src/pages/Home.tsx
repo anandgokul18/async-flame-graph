@@ -158,11 +158,27 @@ export default function Home() {
   const handleCycleParallelPage = useCallback((groupId: string) => {
     setActiveParallelPages(prev => {
       const next = new Map(prev);
-      const current = next.get(groupId) ?? 0;
       const group = flameData?.parallelGroups.get(groupId);
       const total = group ? group.length : 2;
-      const nextIndex = (current + 1) % total;
-      next.set(groupId, nextIndex);
+
+      if (next.has(groupId)) {
+        // Already has an explicit entry — cycle normally
+        const current = next.get(groupId)!;
+        next.set(groupId, (current + 1) % total);
+      } else {
+        // First click — find the default (largest child) and cycle from there
+        let defaultIdx = 0;
+        if (group && group.length > 0) {
+          let maxDur = group[0].duration;
+          for (let i = 1; i < group.length; i++) {
+            if (group[i].duration > maxDur) {
+              maxDur = group[i].duration;
+              defaultIdx = i;
+            }
+          }
+        }
+        next.set(groupId, (defaultIdx + 1) % total);
+      }
       return next;
     });
   }, [flameData]);
