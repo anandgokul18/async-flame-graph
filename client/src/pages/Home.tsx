@@ -5,6 +5,7 @@
  * Layout: Collapsible left panel (JSON input) + full-width flame graph + bottom table
  * Key feature: Proper async/parallel visualization with wall-clock time
  * Supports both to_dict() (wall-clock) and to_scaled_dict() (scaled) render modes
+ * Features: breadcrumb navigation, PNG/SVG export, dual-value tooltips
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -23,6 +24,8 @@ import SpanTooltip from "@/components/SpanTooltip";
 import SpanTable from "@/components/SpanTable";
 import JsonInput from "@/components/JsonInput";
 import Toolbar, { type ViewMode, type ColorMode, type TextAlign } from "@/components/Toolbar";
+import Breadcrumb from "@/components/Breadcrumb";
+import ExportMenu from "@/components/ExportMenu";
 import {
   processFlameData,
   formatDuration,
@@ -31,9 +34,36 @@ import {
 } from "@/lib/flameEngine";
 import type { FlameData, ProcessedSpan, RenderMode } from "@/lib/flameEngine";
 import { parseUrlState, buildShareUrl, syncUrlState } from "@/lib/urlCodec";
+import { exportAsPNG, exportAsSVG } from "@/lib/exportUtils";
 
 const HERO_BG = "https://d2xsxph8kpxj0f.cloudfront.net/310519663317962886/FDYfY7epknZCTg7EfFmBWa/hero-bg-Xups4ahTbG6j4WWTCBp4Av.webp";
 const EMPTY_STATE_IMG = "https://d2xsxph8kpxj0f.cloudfront.net/310519663317962886/FDYfY7epknZCTg7EfFmBWa/empty-state-ju4EJPW4H52F5c24VJcxKe.webp";
+
+// ─── Helper: Build breadcrumb path from root to focused span ────────────────
+
+function buildBreadcrumbPath(
+  root: ProcessedSpan,
+  target: ProcessedSpan,
+): ProcessedSpan[] {
+  const path: ProcessedSpan[] = [];
+
+  function find(span: ProcessedSpan): boolean {
+    if (span.id === target.id) {
+      path.push(span);
+      return true;
+    }
+    for (const child of span.children) {
+      if (find(child)) {
+        path.unshift(span);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  find(root);
+  return path;
+}
 
 export default function Home() {
   // ─── URL-driven initial state ─────────────────────────────────────────────
@@ -66,6 +96,12 @@ export default function Home() {
 
   // Flame graph ref for zoom controls
   const flameGraphRef = useRef<FlameGraphHandle>(null);
+
+  // ─── Breadcrumb path ──────────────────────────────────────────────────────
+  const breadcrumbPath = useMemo(() => {
+    if (!focusedSpan || !flameData) return [];
+    return buildBreadcrumbPath(flameData.root, focusedSpan);
+  }, [focusedSpan, flameData]);
 
   // ─── Sync state to URL hash ───────────────────────────────────────────────
   useEffect(() => {
@@ -125,6 +161,10 @@ export default function Home() {
     setFocusedSpan(null);
   }, []);
 
+  const handleBreadcrumbNavigate = useCallback((span: ProcessedSpan | null) => {
+    setFocusedSpan(span);
+  }, []);
+
   const handleSearchSpan = useCallback((name: string) => {
     setSearchQuery(name);
   }, []);
@@ -139,12 +179,31 @@ export default function Home() {
     setJsonInput(JSON.stringify(data, null, 2));
   }, []);
 
+  // ─── Export handlers ──────────────────────────────────────────────────────
+  const handleExportPNG = useCallback(() => {
+    if (!flameData) return;
+    exportAsPNG(flameData, focusedSpan, searchQuery);
+  }, [flameData, focusedSpan, searchQuery]);
+
+  const handleExportSVG = useCallback(() => {
+    if (!flameData) return;
+    exportAsSVG(flameData, focusedSpan, searchQuery);
+  }, [flameData, focusedSpan, searchQuery]);
+
   // ─── Keyboard shortcuts ────────────────────────────────────────────────────
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setFocusedSpan(null);
-        setSearchQuery('');
+        if (focusedSpan) {
+          // Navigate up one level in breadcrumb, or reset if at top
+          if (breadcrumbPath.length > 1) {
+            setFocusedSpan(breadcrumbPath[breadcrumbPath.length - 2]);
+          } else {
+            setFocusedSpan(null);
+          }
+        } else {
+          setSearchQuery('');
+        }
       }
       if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
         const active = document.activeElement;
@@ -162,7 +221,7 @@ export default function Home() {
 
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, []);
+  }, [focusedSpan, breadcrumbPath]);
 
   // ─── Render ────────────────────────────────────────────────────────────────
   return (
@@ -192,6 +251,14 @@ export default function Home() {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Export menu */}
+          {flameData && (
+            <ExportMenu
+              onExportPNG={handleExportPNG}
+              onExportSVG={handleExportSVG}
+            />
+          )}
+
           {jsonInput.trim() && (
             <button
               onClick={() => {
@@ -236,7 +303,7 @@ export default function Home() {
                   <span className="text-[#E6EDF3] font-medium">2.</span> Set the sample rate (Hz) if using sample-based data
                 </p>
                 <p className="mb-1.5">
-                  <span className="text-[#E6EDF3] font-medium">3.</span> Click spans to focus, use toolbar zoom buttons, drag to pan
+                  <span className="text-[#E6EDF3] font-medium">3.</span> Click spans to focus, use breadcrumbs to navigate, drag to pan
                 </p>
               </div>
               <div>
@@ -266,10 +333,10 @@ export default function Home() {
               </div>
             </div>
             <div className="mt-2 pt-2 border-t border-[#21262D] text-[10px] text-[#6E7681]">
-              Shortcuts: <kbd className="px-1 py-0.5 rounded bg-[#21262D] text-[#8B949E]">Esc</kbd> Reset &middot;
+              Shortcuts: <kbd className="px-1 py-0.5 rounded bg-[#21262D] text-[#8B949E]">Esc</kbd> Back / Reset &middot;
               <kbd className="px-1 py-0.5 rounded bg-[#21262D] text-[#8B949E] ml-1">Ctrl+F</kbd> Search &middot;
               <kbd className="px-1 py-0.5 rounded bg-[#21262D] text-[#8B949E] ml-1">Ctrl+B</kbd> Toggle Panel &middot;
-              <kbd className="px-1 py-0.5 rounded bg-[#21262D] text-[#8B949E] ml-1">+/-</kbd> Zoom
+              Click span to focus &middot; Breadcrumbs to navigate back
             </div>
             <div className="mt-2 pt-2 border-t border-[#21262D] text-[10px] text-[#6E7681]">
               <p className="font-medium text-[#E6EDF3] mb-1">Sharing via URL:</p>
@@ -325,6 +392,14 @@ export default function Home() {
                 onZoomOut={() => flameGraphRef.current?.zoomOut()}
                 onResetZoom={() => flameGraphRef.current?.resetZoom()}
               />
+
+              {/* Breadcrumb navigation */}
+              {breadcrumbPath.length > 0 && (
+                <Breadcrumb
+                  path={breadcrumbPath}
+                  onNavigate={handleBreadcrumbNavigate}
+                />
+              )}
 
               {/* Visualization area */}
               <div className="flex-1 flex flex-col overflow-hidden">

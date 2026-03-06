@@ -1,22 +1,15 @@
 # TODO
 
-- [x] Remove onWheel zoom handler from FlameGraph canvas (trackpad scroll should scroll page normally)
+- [x] Remove onWheel zoom handler from FlameGraph canvas
 - [x] Add zoom in/out/reset buttons to Toolbar
-- [x] Pass zoom control callbacks from Home through Toolbar to FlameGraph
-- [x] Update help text to remove "Scroll to zoom" reference
-- [x] Add URL query parameter support for `hz` and `json` (URL-encoded or base64)
-- [x] Update URL when user changes hz or json input (sync state to URL)
-- [x] Add help text about URL parameter usage
-- [ ] Replace query params with compressed hash-fragment encoding (pako gzip + base64url)
-- [ ] Support large JSON payloads that exceed URL query param limits
-- [ ] Keep backward compat with old ?json= query param links
-- [ ] Update Share URL button to use new compressed format
-- [ ] Update help text with new URL format
-- [ ] Support `concurrent=true` field (auto-detect parallel children, replaces manual `async: true`)
-- [ ] Support `blocking` field on children for visual differentiation
-- [ ] Support `_wall_clock` field from to_scaled_dict() mode
-- [ ] Add toggle to switch between wall-clock (to_dict) and scaled (to_scaled_dict) rendering
-- [ ] In wall-clock mode: children can overflow parent width (show true durations)
-- [ ] In scaled mode: children fit within parent width, tooltip shows _wall_clock values
-- [ ] Update sample data to include both formats for testing
-- [ ] FIX: Scaled mode children must inherit parent's x-position for nested hierarchy (not start from x=0)
+- [x] Compressed hash-fragment URL sharing (pako gzip + base64url)
+- [x] Support concurrent/blocking/_wall_clock fields from profiler
+- [x] Wall-Clock / Scaled mode toggle
+- [x] FIX: Scaled mode nested hierarchy layout
+
+## New Features
+- [ ] Dual-value tooltips: show both scaled duration and _wall_clock in Scaled mode
+- [ ] Click-to-focus subtree: click a span to zoom into it as new root
+- [ ] Breadcrumb trail: show navigation path back to root when focused
+- [ ] Export as PNG: render current flame graph view to downloadable PNG
+- [ ] Export as SVG: render current flame graph view to downloadable SVG

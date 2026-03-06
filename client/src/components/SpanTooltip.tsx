@@ -1,7 +1,7 @@
 /**
  * SpanTooltip — Frosted glass tooltip for span details
  * Design: Observatory dark console with glass-panel effect
- * Shows wall-clock values and blocking/concurrent status
+ * Shows both scaled and wall-clock values in Scaled mode
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -46,6 +46,7 @@ export default function SpanTooltip({ span, x, y, totalDuration, renderMode }: S
   const percentage = totalDuration > 0 ? (span.duration / totalDuration * 100) : 0;
   const selfPercentage = totalDuration > 0 ? (span.selfTime / totalDuration * 100) : 0;
   const hasWallClock = span.wallClockValue > 0 && Math.abs(span.wallClockValue - span.duration) > 0.0001;
+  const isScaled = renderMode === 'scaled';
 
   return (
     <div
@@ -62,10 +63,23 @@ export default function SpanTooltip({ span, x, y, totalDuration, renderMode }: S
         {span.name}
       </div>
 
-      {/* Render mode indicator */}
-      {renderMode === 'scaled' && (
-        <div className="mb-2 px-2 py-1 rounded bg-[#FFB020]/10 border border-[#FFB020]/20">
-          <span className="text-[10px] text-[#FFB020] font-medium">Scaled View</span>
+      {/* Scaled mode dual-value banner */}
+      {isScaled && hasWallClock && (
+        <div className="mb-2 px-2.5 py-2 rounded-md bg-[#FFB020]/10 border border-[#FFB020]/20">
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#FFB020]" />
+            <span className="text-[10px] text-[#FFB020] font-semibold uppercase tracking-wider">Scaled View</span>
+          </div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+            <div className="text-[10px] text-[#8B949E]">Displayed</div>
+            <div className="text-[10px] font-mono text-[#00D4FF] font-medium text-right">
+              {formatDuration(span.duration)}
+            </div>
+            <div className="text-[10px] text-[#8B949E]">Actual (wall-clock)</div>
+            <div className="text-[10px] font-mono text-[#FFB020] font-medium text-right">
+              {formatDuration(span.wallClockValue)}
+            </div>
+          </div>
         </div>
       )}
 
@@ -75,6 +89,9 @@ export default function SpanTooltip({ span, x, y, totalDuration, renderMode }: S
           <span className="text-[#8B949E]">Duration</span>
           <span className="font-mono text-[#00D4FF] font-medium">
             {formatDuration(span.duration)}
+            {isScaled && hasWallClock && (
+              <span className="text-[#8B949E] ml-1">(scaled)</span>
+            )}
           </span>
         </div>
 
@@ -84,6 +101,9 @@ export default function SpanTooltip({ span, x, y, totalDuration, renderMode }: S
             <span className="text-[#8B949E]">Wall-Clock</span>
             <span className="font-mono text-[#FFB020] font-medium">
               {formatDuration(span.wallClockValue)}
+              {isScaled && (
+                <span className="text-[#8B949E] ml-1">(actual)</span>
+              )}
             </span>
           </div>
         )}
