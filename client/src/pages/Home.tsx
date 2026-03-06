@@ -97,6 +97,9 @@ export default function Home() {
   // Flame graph ref for zoom controls
   const flameGraphRef = useRef<FlameGraphHandle>(null);
 
+  // Paper-stack parallel pages state
+  const [activeParallelPages, setActiveParallelPages] = useState<Map<string, number>>(new Map());
+
   // ─── Breadcrumb path ──────────────────────────────────────────────────────
   const breadcrumbPath = useMemo(() => {
     if (!focusedSpan || !flameData) return [];
@@ -138,19 +141,31 @@ export default function Home() {
         }
       }
 
-      const data = processFlameData(parsed, { hz, mode: 'time', renderMode });
+      const data = processFlameData(parsed, { hz, mode: 'time', renderMode, activeParallelPages });
       setFlameData(data);
       setFocusedSpan(null);
     } catch (err) {
       setJsonError(err instanceof Error ? err.message : 'Invalid JSON');
       setFlameData(null);
     }
-  }, [jsonInput, hz, renderMode]);
+  }, [jsonInput, hz, renderMode, activeParallelPages]);
 
   // ─── Handlers ──────────────────────────────────────────────────────────────
   const handleSpanClick = useCallback((span: ProcessedSpan) => {
     setFocusedSpan(prev => prev?.id === span.id ? null : span);
   }, []);
+
+  const handleCycleParallelPage = useCallback((groupId: string) => {
+    setActiveParallelPages(prev => {
+      const next = new Map(prev);
+      const current = next.get(groupId) ?? 0;
+      const group = flameData?.parallelGroups.get(groupId);
+      const total = group ? group.length : 2;
+      const nextIndex = (current + 1) % total;
+      next.set(groupId, nextIndex);
+      return next;
+    });
+  }, [flameData]);
 
   const handleSpanHover = useCallback((span: ProcessedSpan | null, x: number, y: number) => {
     setTooltipSpan(span);
@@ -414,6 +429,8 @@ export default function Home() {
                       onSpanClick={handleSpanClick}
                       onSpanHover={handleSpanHover}
                       focusedSpan={focusedSpan}
+                      activeParallelPages={activeParallelPages}
+                      onCycleParallelPage={handleCycleParallelPage}
                     />
                   </div>
                 )}

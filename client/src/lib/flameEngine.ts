@@ -68,6 +68,10 @@ export interface ProcessedSpan {
   width: number;        // normalized width (0-1)
   y: number;            // row index
   color: string;
+  // Paper-stack parallel group tracking
+  parallelGroupId?: string;    // ID of the parent that has concurrent children
+  parallelIndex?: number;      // 0-based index within the parallel group
+  parallelSiblingCount?: number; // total siblings in the parallel group
   // Metadata
   attributes?: Record<string, unknown>;
   parentId?: string;
@@ -79,12 +83,14 @@ export interface FlameData {
   maxDepth: number;
   allSpans: ProcessedSpan[];
   asyncGroups: Map<string, ProcessedSpan[]>;
+  parallelGroups: Map<string, ProcessedSpan[]>; // groupId → list of parallel children
 }
 
 export interface ProcessingOptions {
   hz: number;
   mode: 'time' | 'samples';
   renderMode: RenderMode;
+  activeParallelPages?: Map<string, number>; // groupId → active child index (for paper-stack)
 }
 
 // ─── Color Generation ────────────────────────────────────────────────────────
@@ -476,13 +482,42 @@ function createEmptySpan(): ProcessedSpan {
   };
 }
 
+// ─── Tag Parallel Groups ────────────────────────────────────────────────────
+
+/**
+ * Walk the tree and tag children of concurrent parents with parallelGroupId,
+ * parallelIndex, and parallelSiblingCount so the renderer can show paper-stacks.
+ */
+function tagParallelGroups(span: ProcessedSpan): void {
+  const isParallelGroup = span.isAsync || span.isConcurrent || span.children.some(c => c.isParallel);
+
+  if (isParallelGroup && span.children.length > 1) {
+    const groupId = span.id;
+    for (let i = 0; i < span.children.length; i++) {
+      span.children[i].parallelGroupId = groupId;
+      span.children[i].parallelIndex = i;
+      span.children[i].parallelSiblingCount = span.children.length;
+    }
+  }
+
+  for (const child of span.children) {
+    tagParallelGroups(child);
+  }
+}
+
 // ─── Layout Calculation ──────────────────────────────────────────────────────
 
 /**
- * Wall-Clock layout: children of concurrent parents are rendered in parallel lanes.
- * Children can visually overflow the parent width (true wall-clock representation).
+ * Wall-Clock layout with Paper-Stack support:
+ * Instead of rendering ALL parallel children in separate lanes (which causes overflow),
+ * only render the ACTIVE child per parallel group. Other children are hidden.
+ * The active child is determined by the activePages map.
  */
-function calculateLayoutWallClock(span: ProcessedSpan, totalDuration: number): void {
+function calculateLayoutWallClock(
+  span: ProcessedSpan,
+  totalDuration: number,
+  activePages?: Map<string, number>,
+): void {
   if (totalDuration <= 0) {
     span.x = 0;
     span.width = 1;
@@ -497,20 +532,40 @@ function calculateLayoutWallClock(span: ProcessedSpan, totalDuration: number): v
   if (span.children.length > 0) {
     const isParallelGroup = span.isAsync || span.isConcurrent || span.children.some(c => c.isParallel);
 
-    if (isParallelGroup) {
-      let laneOffset = 0;
+    if (isParallelGroup && span.children.length > 1) {
+      // Paper-stack mode: only layout the active child
+      const groupId = span.id;
+      const activeIndex = activePages?.get(groupId) ?? 0;
+      const safeIndex = Math.min(activeIndex, span.children.length - 1);
+
+      // Only layout the active child — others stay at x=0, width=0 (hidden)
       for (let i = 0; i < span.children.length; i++) {
         const child = span.children[i];
-        adjustDepth(child, laneOffset);
-        calculateLayoutWallClock(child, totalDuration);
-        const childMaxDepth = getSubtreeDepth(child);
-        laneOffset += (childMaxDepth - child.depth + 1);
+        if (i === safeIndex) {
+          // Active child: layout normally at depth + 1
+          calculateLayoutWallClock(child, totalDuration, activePages);
+        } else {
+          // Inactive children: mark as hidden (width=0)
+          hideSubtree(child);
+        }
       }
     } else {
       for (const child of span.children) {
-        calculateLayoutWallClock(child, totalDuration);
+        calculateLayoutWallClock(child, totalDuration, activePages);
       }
     }
+  }
+}
+
+/**
+ * Mark a span and all its descendants as hidden (width=0) so they won't render.
+ */
+function hideSubtree(span: ProcessedSpan): void {
+  span.x = -1;
+  span.width = 0;
+  span.color = span.color || '#6C757D';
+  for (const child of span.children) {
+    hideSubtree(child);
   }
 }
 
@@ -654,11 +709,14 @@ export function processFlameData(rawJson: unknown, options: ProcessingOptions): 
 
   const totalDuration = root.duration;
 
+  // Tag parallel groups on children BEFORE layout
+  tagParallelGroups(root);
+
   // Apply layout based on render mode
   if (options.renderMode === 'scaled') {
     calculateLayoutScaled(root, totalDuration);
   } else {
-    calculateLayoutWallClock(root, totalDuration);
+    calculateLayoutWallClock(root, totalDuration, options.activeParallelPages);
   }
 
   const allSpans = collectAllSpans(root);
@@ -676,12 +734,24 @@ export function processFlameData(rawJson: unknown, options: ProcessingOptions): 
     }
   }
 
+  // Build parallelGroups map (groupId → children of that concurrent parent)
+  const parallelGroups = new Map<string, ProcessedSpan[]>();
+  for (const span of allSpans) {
+    if (span.parallelGroupId !== undefined && span.parallelIndex !== undefined) {
+      if (!parallelGroups.has(span.parallelGroupId)) {
+        parallelGroups.set(span.parallelGroupId, []);
+      }
+      parallelGroups.get(span.parallelGroupId)!.push(span);
+    }
+  }
+
   return {
     root,
     totalDuration,
     maxDepth,
     allSpans,
     asyncGroups,
+    parallelGroups,
   };
 }
 

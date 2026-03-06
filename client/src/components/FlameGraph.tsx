@@ -2,8 +2,11 @@
  * FlameGraph — Custom canvas-based flame graph visualization
  * 
  * Design: Observatory dark console
- * Features: async/parallel lanes, zoom, pan, search, focus, tooltips
+ * Features: async/parallel paper-stack, zoom, pan, search, focus, tooltips
  * Time axis shows seconds (wall-clock time)
+ * 
+ * Paper-Stack: Parallel children are shown one at a time with a visual
+ * stack indicator. Click the HTML overlay badge to cycle through siblings.
  */
 
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, forwardRef } from "react";
@@ -18,7 +21,6 @@ const MIN_BAR_WIDTH = 2;
 const FONT_SIZE = 11;
 const TIMELINE_HEIGHT = 36;
 const PADDING_TOP = 10;
-const ASYNC_INDICATOR_HEIGHT = 3;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -29,6 +31,8 @@ interface FlameGraphProps {
   onSpanClick?: (span: ProcessedSpan) => void;
   onSpanHover?: (span: ProcessedSpan | null, x: number, y: number) => void;
   focusedSpan?: ProcessedSpan | null;
+  activeParallelPages: Map<string, number>;
+  onCycleParallelPage?: (groupId: string) => void;
 }
 
 export interface FlameGraphHandle {
@@ -55,16 +59,15 @@ function getVisibleSpans(
   const focusW = focusedSpan ? focusedSpan.width : 1;
 
   function traverse(span: ProcessedSpan) {
-    // Normalize position relative to focus
+    if (span.width <= 0) return;
+
     const normalizedX = focusW > 0 ? (span.x - focusX) / focusW : span.x;
     const normalizedW = focusW > 0 ? span.width / focusW : span.width;
 
     const pixelX = (normalizedX * viewState.zoom + viewState.offsetX) * canvasWidth;
     const pixelW = normalizedW * viewState.zoom * canvasWidth;
 
-    // Cull off-screen spans
     if (pixelX + pixelW < -50 || pixelX > canvasWidth + 50) return;
-    // Cull too-small spans (but still traverse children)
     if (pixelW >= 0.5) {
       result.push(span);
     }
@@ -78,7 +81,7 @@ function getVisibleSpans(
   return result;
 }
 
-function getSpanAtPosition(
+function getHitSpan(
   spans: ProcessedSpan[],
   mouseX: number,
   mouseY: number,
@@ -89,7 +92,6 @@ function getSpanAtPosition(
   const focusX = focusedSpan ? focusedSpan.x : 0;
   const focusW = focusedSpan ? focusedSpan.width : 1;
 
-  // Check from top (deepest spans first for correct z-order)
   const sorted = [...spans].sort((a, b) => b.depth - a.depth);
 
   for (const span of sorted) {
@@ -127,7 +129,6 @@ function drawTimeline(
   ctx.fillStyle = '#0D1117';
   ctx.fillRect(0, 0, width, TIMELINE_HEIGHT);
 
-  // Bottom border
   ctx.strokeStyle = '#21262D';
   ctx.lineWidth = 1;
   ctx.beginPath();
@@ -135,12 +136,10 @@ function drawTimeline(
   ctx.lineTo(width, TIMELINE_HEIGHT - 0.5);
   ctx.stroke();
 
-  // Calculate tick interval
   const visibleDuration = focusDuration / viewState.zoom;
   const targetTicks = width / 120;
   const rawInterval = visibleDuration / targetTicks;
 
-  // Nice intervals
   const niceIntervals = [0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 30, 60];
   let interval = niceIntervals[0];
   for (const ni of niceIntervals) {
@@ -152,7 +151,6 @@ function drawTimeline(
 
   const visibleStart = focusStart + (-viewState.offsetX / viewState.zoom) * focusDuration;
   const visibleEnd = visibleStart + visibleDuration;
-
   const firstTick = Math.floor(visibleStart / interval) * interval;
 
   ctx.font = `${FONT_SIZE - 1}px 'JetBrains Mono', monospace`;
@@ -165,17 +163,57 @@ function drawTimeline(
 
     if (pixelX < -20 || pixelX > width + 20) continue;
 
-    // Tick mark
     ctx.strokeStyle = '#30363D';
     ctx.beginPath();
     ctx.moveTo(pixelX, TIMELINE_HEIGHT - 8);
     ctx.lineTo(pixelX, TIMELINE_HEIGHT - 1);
     ctx.stroke();
 
-    // Label
     ctx.fillStyle = '#8B949E';
     ctx.fillText(formatDuration(t), pixelX, TIMELINE_HEIGHT - 10);
   }
+}
+
+// ─── Paper Stack Drawing (canvas only — visual layers) ──────────────────────
+
+function drawPaperStackLayers(
+  ctx: CanvasRenderingContext2D,
+  pixelX: number,
+  pixelY: number,
+  pixelW: number,
+  totalCount: number,
+) {
+  const stackLayers = Math.min(totalCount - 1, 3);
+  
+  for (let i = stackLayers; i >= 1; i--) {
+    const offsetX = i * 3;
+    const offsetY = -i * 2;
+    
+    ctx.fillStyle = `rgba(33, 38, 45, ${0.6 + i * 0.1})`;
+    ctx.strokeStyle = 'rgba(48, 54, 61, 0.6)';
+    ctx.lineWidth = 1;
+    
+    ctx.beginPath();
+    ctx.roundRect(
+      pixelX + offsetX,
+      pixelY + offsetY,
+      Math.max(pixelW - offsetX, 20),
+      ROW_HEIGHT,
+      3
+    );
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
+// ─── Badge position info for HTML overlays ──────────────────────────────────
+
+interface BadgeInfo {
+  groupId: string;
+  activeIndex: number;
+  totalCount: number;
+  x: number;
+  y: number;
 }
 
 // ─── Main Component ──────────────────────────────────────────────────────────
@@ -187,6 +225,8 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
   onSpanClick,
   onSpanHover,
   focusedSpan,
+  activeParallelPages,
+  onCycleParallelPage,
 }, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -196,11 +236,15 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
   const isDragging = useRef(false);
   const dragStart = useRef({ x: 0, offsetX: 0 });
   const animFrameRef = useRef<number>(0);
+  const [badges, setBadges] = useState<BadgeInfo[]>([]);
 
   // Calculate canvas height based on max depth
   const canvasHeight = useMemo(() => {
     return TIMELINE_HEIGHT + PADDING_TOP + (data.maxDepth + 1) * (ROW_HEIGHT + ROW_GAP) + 20;
   }, [data.maxDepth]);
+
+  // Actual pixel height for canvas buffer (match CSS height)
+  const actualHeight = Math.max(canvasSize.height, canvasHeight);
 
   // Resize observer
   useEffect(() => {
@@ -210,7 +254,6 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const w = entry.contentRect.width;
-        // Always use data-driven height for rendering
         setCanvasSize({ width: w, height: canvasHeight });
       }
     });
@@ -227,210 +270,152 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
   // Search matching
   const searchMatches = useMemo(() => {
     if (!searchQuery) return new Set<string>();
-    const query = searchQuery.toLowerCase();
-    return new Set(
-      data.allSpans
-        .filter(s => s.name.toLowerCase().includes(query))
-        .map(s => s.id)
-    );
-  }, [searchQuery, data.allSpans]);
+    const q = searchQuery.toLowerCase();
+    const matches = new Set<string>();
+    for (const span of visibleSpans) {
+      if (span.name.toLowerCase().includes(q)) {
+        matches.add(span.id);
+      }
+    }
+    return matches;
+  }, [visibleSpans, searchQuery]);
 
-  // ─── Rendering ─────────────────────────────────────────────────────────────
+  // ─── Canvas Rendering ─────────────────────────────────────────────────────
 
   const render = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = canvasSize.width * dpr;
-    canvas.height = canvasSize.height * dpr;
-    ctx.scale(dpr, dpr);
+    const w = canvasSize.width;
+    const h = actualHeight;
 
     // Clear
+    ctx.clearRect(0, 0, w, h);
     ctx.fillStyle = '#0D1117';
-    ctx.fillRect(0, 0, canvasSize.width, canvasSize.height);
+    ctx.fillRect(0, 0, w, h);
 
-    // Draw timeline
-    drawTimeline(ctx, canvasSize.width, data.totalDuration, viewState, focusedSpan);
+    // Timeline
+    drawTimeline(ctx, w, data.totalDuration, viewState, focusedSpan);
 
     const focusX = focusedSpan ? focusedSpan.x : 0;
     const focusW = focusedSpan ? focusedSpan.width : 1;
 
-    // Draw subtle vertical grid lines
-    {
-      const focusStart = focusedSpan ? focusedSpan.startTime : 0;
-      const focusDuration = focusedSpan ? focusedSpan.duration : data.totalDuration;
-      const visibleDuration = focusDuration / viewState.zoom;
-      const targetTicks = canvasSize.width / 120;
-      const rawInterval = visibleDuration / targetTicks;
-      const niceIntervals = [0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 30, 60];
-      let interval = niceIntervals[0];
-      for (const ni of niceIntervals) {
-        if (ni >= rawInterval) { interval = ni; break; }
-      }
-      const visibleStart = focusStart + (-viewState.offsetX / viewState.zoom) * focusDuration;
-      const visibleEnd = visibleStart + visibleDuration;
-      const firstTick = Math.floor(visibleStart / interval) * interval;
-
-      ctx.strokeStyle = 'rgba(48, 54, 61, 0.3)';
-      ctx.lineWidth = 1;
-      for (let t = firstTick; t <= visibleEnd + interval; t += interval) {
-        const normalizedT = (t - focusStart) / focusDuration;
-        const pixelX = (normalizedT * viewState.zoom + viewState.offsetX) * canvasSize.width;
-        if (pixelX < 0 || pixelX > canvasSize.width) continue;
-        ctx.beginPath();
-        ctx.moveTo(pixelX, TIMELINE_HEIGHT);
-        ctx.lineTo(pixelX, canvasSize.height);
-        ctx.stroke();
-      }
-    }
-
-    // Draw async group lane backgrounds FIRST (behind spans)
-    for (const span of data.allSpans) {
-      if (!span.isAsync || span.children.length < 2) continue;
-
-      let minChildDepth = Infinity;
-      let maxChildDepth = -Infinity;
-      const collectDepthsBg = (s: ProcessedSpan) => {
-        minChildDepth = Math.min(minChildDepth, s.depth);
-        maxChildDepth = Math.max(maxChildDepth, s.depth);
-        s.children.forEach(collectDepthsBg);
-      };
-      span.children.forEach(collectDepthsBg);
-
-      if (minChildDepth <= maxChildDepth) {
-        const laneTop = TIMELINE_HEIGHT + PADDING_TOP + minChildDepth * (ROW_HEIGHT + ROW_GAP) - 2;
-        const laneBottom = TIMELINE_HEIGHT + PADDING_TOP + (maxChildDepth + 1) * (ROW_HEIGHT + ROW_GAP);
-
-        // Subtle lane background
-        ctx.fillStyle = 'rgba(0, 212, 255, 0.03)';
-        ctx.fillRect(0, laneTop, canvasSize.width, laneBottom - laneTop);
-
-        // Left edge indicator
-        ctx.fillStyle = 'rgba(0, 212, 255, 0.15)';
-        ctx.fillRect(0, laneTop, 3, laneBottom - laneTop);
-
-        // Draw lane separator lines between parallel children
-        for (let i = 0; i < span.children.length; i++) {
-          const child = span.children[i];
-          if (i > 0) {
-            const separatorY = TIMELINE_HEIGHT + PADDING_TOP + child.depth * (ROW_HEIGHT + ROW_GAP) - 1;
-            ctx.strokeStyle = 'rgba(0, 212, 255, 0.12)';
-            ctx.lineWidth = 1;
-            ctx.setLineDash([4, 4]);
-            ctx.beginPath();
-            ctx.moveTo(0, separatorY);
-            ctx.lineTo(canvasSize.width, separatorY);
-            ctx.stroke();
-            ctx.setLineDash([]);
-          }
-        }
-      }
-    }
+    // Collect badge positions
+    const newBadges: BadgeInfo[] = [];
 
     // Draw spans
     for (const span of visibleSpans) {
       const normalizedX = focusW > 0 ? (span.x - focusX) / focusW : span.x;
       const normalizedW = focusW > 0 ? span.width / focusW : span.width;
 
-      const pixelX = (normalizedX * viewState.zoom + viewState.offsetX) * canvasSize.width;
-      const pixelW = Math.max(MIN_BAR_WIDTH, normalizedW * viewState.zoom * canvasSize.width);
+      const pixelX = (normalizedX * viewState.zoom + viewState.offsetX) * w;
+      const pixelW = Math.max(MIN_BAR_WIDTH, normalizedW * viewState.zoom * w);
       const pixelY = TIMELINE_HEIGHT + PADDING_TOP + span.depth * (ROW_HEIGHT + ROW_GAP);
 
-      // Determine color
-      let fillColor = span.color;
-      let alpha = 1;
-
-      if (searchQuery && searchMatches.size > 0) {
-        if (!searchMatches.has(span.id)) {
-          alpha = 0.25;
-        }
+      // Draw paper-stack background layers BEFORE the main bar
+      if (
+        span.parallelGroupId !== undefined &&
+        span.parallelSiblingCount !== undefined &&
+        span.parallelSiblingCount > 1 &&
+        span.parallelIndex !== undefined &&
+        pixelW > 30
+      ) {
+        drawPaperStackLayers(ctx, pixelX, pixelY, pixelW, span.parallelSiblingCount);
       }
 
-      if (hoveredSpan && hoveredSpan.id === span.id) {
-        alpha = 0.85;
+      // Bar color
+      let barColor = span.color;
+      const isHovered = hoveredSpan?.id === span.id;
+      const isSearchMatch = searchQuery && searchMatches.has(span.id);
+      const isSearchDimmed = searchQuery && !searchMatches.has(span.id);
+
+      if (isSearchDimmed) {
+        ctx.globalAlpha = 0.25;
       }
 
-      // Draw bar
-      ctx.globalAlpha = alpha;
-      ctx.fillStyle = fillColor;
-
-      // Rounded corners for wider bars
-      const radius = pixelW > 6 ? 3 : 1;
+      // Main bar
+      const r = 3;
+      ctx.fillStyle = barColor;
       ctx.beginPath();
-      ctx.roundRect(pixelX, pixelY, pixelW, ROW_HEIGHT, radius);
+      ctx.roundRect(pixelX, pixelY, pixelW, ROW_HEIGHT, r);
       ctx.fill();
 
-      // Subtle dark border for depth
-      ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
-      ctx.lineWidth = 0.5;
-      ctx.beginPath();
-      ctx.roundRect(pixelX, pixelY, pixelW, ROW_HEIGHT, radius);
+      // Border
+      ctx.strokeStyle = isHovered
+        ? 'rgba(0, 212, 255, 0.8)'
+        : isSearchMatch
+          ? 'rgba(255, 215, 0, 0.8)'
+          : 'rgba(0, 0, 0, 0.3)';
+      ctx.lineWidth = isHovered || isSearchMatch ? 2 : 1;
       ctx.stroke();
 
-      // Async indicator (small colored strip at top)
-      if (span.isAsync || span.isParallel) {
-        ctx.fillStyle = '#00D4FF';
-        ctx.fillRect(pixelX, pixelY, pixelW, ASYNC_INDICATOR_HEIGHT);
+      // Async indicator
+      if (span.isConcurrent) {
+        ctx.fillStyle = 'rgba(0, 212, 255, 0.7)';
+        ctx.fillRect(pixelX, pixelY + ROW_HEIGHT - 3, pixelW, 3);
       }
 
-      // Hover highlight
-      if (hoveredSpan && hoveredSpan.id === span.id) {
-        ctx.strokeStyle = '#00D4FF';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.roundRect(pixelX, pixelY, pixelW, ROW_HEIGHT, radius);
-        ctx.stroke();
-      }
-
-      // Focus highlight
-      if (focusedSpan && focusedSpan.id === span.id) {
-        ctx.strokeStyle = '#FFB020';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.roundRect(pixelX, pixelY, pixelW, ROW_HEIGHT, radius);
-        ctx.stroke();
+      // Collect badge info for HTML overlay
+      if (
+        span.parallelGroupId !== undefined &&
+        span.parallelSiblingCount !== undefined &&
+        span.parallelSiblingCount > 1 &&
+        span.parallelIndex !== undefined &&
+        pixelW > 30
+      ) {
+        const activeIdx = activeParallelPages.get(span.parallelGroupId) ?? 0;
+        newBadges.push({
+          groupId: span.parallelGroupId,
+          activeIndex: activeIdx,
+          totalCount: span.parallelSiblingCount,
+          x: pixelX + pixelW - 40,
+          y: pixelY + 3,
+        });
       }
 
       // Text label
-      if (pixelW > 40) {
-        ctx.fillStyle = '#FFFFFF';
+      if (pixelW > 20) {
+        ctx.fillStyle = '#E6EDF3';
         ctx.font = `${FONT_SIZE}px 'JetBrains Mono', monospace`;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
 
         const textY = pixelY + ROW_HEIGHT / 2;
         const textX = pixelX + 4;
-        const maxTextWidth = pixelW - 8;
+        const hasBadge = span.parallelGroupId !== undefined &&
+          span.parallelSiblingCount !== undefined &&
+          span.parallelSiblingCount > 1 &&
+          pixelW > 30;
+        const badgeReserve = hasBadge ? 50 : 0;
+        const maxTextWidth = pixelW - 8 - badgeReserve;
 
-        // Truncate text
-        let text = span.name;
-        const timeStr = ` (${formatDuration(span.duration)})`;
+        if (maxTextWidth > 20) {
+          let text = span.name;
+          const timeStr = ` (${formatDuration(span.duration)})`;
 
-        if (pixelW > 150) {
-          text = text + timeStr;
-        }
-
-        // Measure and truncate
-        let measured = ctx.measureText(text);
-        if (measured.width > maxTextWidth) {
-          while (text.length > 3 && ctx.measureText(text + '...').width > maxTextWidth) {
-            text = text.slice(0, -1);
+          if (pixelW > 150 + badgeReserve) {
+            text = text + timeStr;
           }
-          text = text + '...';
-        }
 
-        ctx.fillText(text, textX, textY);
+          const measured = ctx.measureText(text);
+          if (measured.width > maxTextWidth) {
+            while (text.length > 3 && ctx.measureText(text + '...').width > maxTextWidth) {
+              text = text.slice(0, -1);
+            }
+            text = text + '...';
+          }
+
+          ctx.fillText(text, textX, textY);
+        }
       }
 
       ctx.globalAlpha = 1;
     }
 
-    // (Lane backgrounds already drawn before spans)
-  }, [canvasSize, data, viewState, visibleSpans, hoveredSpan, searchQuery, searchMatches, focusedSpan]);
+    setBadges(newBadges);
+  }, [canvasSize, actualHeight, data, viewState, visibleSpans, hoveredSpan, searchQuery, searchMatches, focusedSpan, activeParallelPages]);
 
   // Render on state change
   useEffect(() => {
@@ -446,8 +431,10 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
     if (!canvas) return;
 
     const rect = canvas.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const mouseX = (e.clientX - rect.left) * scaleX;
+    const mouseY = (e.clientY - rect.top) * scaleY;
 
     if (isDragging.current) {
       const dx = (e.clientX - dragStart.current.x) / canvasSize.width;
@@ -458,13 +445,13 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
       return;
     }
 
-    const span = getSpanAtPosition(
+    const hit = getHitSpan(
       visibleSpans, mouseX, mouseY, viewState, canvasSize.width, focusedSpan
     );
-    setHoveredSpan(span);
-    onSpanHover?.(span, e.clientX, e.clientY);
+    setHoveredSpan(hit);
+    onSpanHover?.(hit, e.clientX, e.clientY);
 
-    canvas.style.cursor = span ? 'pointer' : 'default';
+    canvas.style.cursor = hit ? 'pointer' : 'default';
   }, [visibleSpans, viewState, canvasSize.width, focusedSpan, onSpanHover]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -477,19 +464,21 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
       const dx = Math.abs(e.clientX - dragStart.current.x);
       isDragging.current = false;
 
-      // If barely moved, treat as click
       if (dx < 3) {
         const canvas = canvasRef.current;
         if (!canvas) return;
         const rect = canvas.getBoundingClientRect();
-        const mouseX = e.clientX - rect.left;
-        const mouseY = e.clientY - rect.top;
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        const mouseX = (e.clientX - rect.left) * scaleX;
+        const mouseY = (e.clientY - rect.top) * scaleY;
 
-        const span = getSpanAtPosition(
+        const hit = getHitSpan(
           visibleSpans, mouseX, mouseY, viewState, canvasSize.width, focusedSpan
         );
-        if (span) {
-          onSpanClick?.(span);
+
+        if (hit) {
+          onSpanClick?.(hit);
         }
       }
     }
@@ -506,7 +495,6 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
   const zoomIn = useCallback(() => {
     setViewState(prev => {
       const newZoom = Math.min(500, prev.zoom * 1.4);
-      // Zoom towards center
       const center = 0.5;
       const newOffsetX = center - (center - prev.offsetX) * (newZoom / prev.zoom);
       return { zoom: newZoom, offsetX: newOffsetX };
@@ -538,14 +526,14 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
   }, [data]);
 
   return (
-    <div ref={containerRef} className="w-full h-full" style={{ overflow: 'auto' }}>
+    <div ref={containerRef} className="w-full h-full relative" style={{ overflow: 'auto' }}>
       <canvas
         ref={canvasRef}
         width={canvasSize.width}
-        height={canvasSize.height}
+        height={actualHeight}
         style={{
           width: canvasSize.width,
-          height: Math.max(canvasSize.height, canvasHeight),
+          height: actualHeight,
           display: 'block',
         }}
         onMouseMove={handleMouseMove}
@@ -553,6 +541,46 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseLeave}
       />
+      {/* HTML overlay badges for paper-stack cycling — much more reliable than canvas hit detection */}
+      {badges.map((badge) => (
+        <button
+          key={badge.groupId}
+          onClick={(e) => {
+            e.stopPropagation();
+            onCycleParallelPage?.(badge.groupId);
+          }}
+          className="absolute flex items-center justify-center select-none"
+          style={{
+            left: badge.x,
+            top: badge.y,
+            height: 18,
+            minWidth: 32,
+            padding: '0 6px',
+            borderRadius: 9,
+            background: 'rgba(0, 212, 255, 0.9)',
+            color: '#0D1117',
+            fontSize: 10,
+            fontWeight: 700,
+            fontFamily: "'JetBrains Mono', monospace",
+            cursor: 'pointer',
+            zIndex: 10,
+            border: '1px solid rgba(0, 212, 255, 0.4)',
+            transition: 'transform 0.1s ease, background 0.1s ease',
+            lineHeight: 1,
+          }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLElement).style.transform = 'scale(1.15)';
+            (e.currentTarget as HTMLElement).style.background = 'rgba(0, 212, 255, 1)';
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLElement).style.transform = 'scale(1)';
+            (e.currentTarget as HTMLElement).style.background = 'rgba(0, 212, 255, 0.9)';
+          }}
+          title={`Click to cycle through ${badge.totalCount} parallel tasks (${badge.activeIndex + 1}/${badge.totalCount})`}
+        >
+          {badge.activeIndex + 1}/{badge.totalCount}
+        </button>
+      ))}
     </div>
   );
 });
