@@ -19,3 +19,4 @@
 - [ ] In wall-clock mode: children can overflow parent width (show true durations)
 - [ ] In scaled mode: children fit within parent width, tooltip shows _wall_clock values
 - [ ] Update sample data to include both formats for testing
+- [ ] FIX: Scaled mode children must inherit parent's x-position for nested hierarchy (not start from x=0)

@@ -515,66 +515,84 @@ function calculateLayoutWallClock(span: ProcessedSpan, totalDuration: number): v
 }
 
 /**
- * Scaled layout: children of concurrent parents are proportionally scaled
- * to fit within the parent's width. The _wall_clock values are preserved
- * in wallClockValue for tooltip display.
+ * Scaled layout: children are proportionally laid out within their parent's
+ * x-range. For concurrent parents, children are scaled to fit within parent
+ * width. For sequential parents, children are laid out left-to-right within
+ * the parent's x-range.
  * 
- * This matches the to_scaled_dict() behavior:
- *   child_scale = parent.value / sum(children.value)
- *   Each child width = child.value * child_scale
+ * The key insight: we pass parentX and parentWidth down so every child knows
+ * its parent's visual bounds and can position itself relative to them.
+ * This ensures proper nesting at every depth level.
  */
-function calculateLayoutScaled(span: ProcessedSpan, totalDuration: number): void {
-  if (totalDuration <= 0) {
-    span.x = 0;
-    span.width = 1;
-  } else {
-    span.x = span.startTime / totalDuration;
-    span.width = span.duration / totalDuration;
+function calculateLayoutScaled(
+  span: ProcessedSpan,
+  totalDuration: number,
+  parentX?: number,
+  parentWidth?: number,
+): void {
+  // If parentX/parentWidth are provided, this span's x/width were already set by the caller.
+  // Otherwise compute from startTime/duration (only for the root).
+  if (parentX === undefined) {
+    if (totalDuration <= 0) {
+      span.x = 0;
+      span.width = 1;
+    } else {
+      span.x = span.startTime / totalDuration;
+      span.width = span.duration / totalDuration;
+    }
   }
 
   const selfRatio = span.duration > 0 ? span.selfTime / span.duration : 0;
   span.color = getSpanColor(span.name, selfRatio);
 
-  if (span.children.length > 0) {
-    const isParallelGroup = span.isAsync || span.isConcurrent || span.children.some(c => c.isParallel);
+  if (span.children.length === 0) return;
 
-    if (isParallelGroup) {
-      // Scale children to fit within parent width
-      const childSum = span.children.reduce((sum, c) => sum + c.duration, 0);
-      const scale = childSum > 0 ? span.duration / childSum : 1;
+  const isParallelGroup = span.isAsync || span.isConcurrent || span.children.some(c => c.isParallel);
 
-      // Lay out children sequentially within parent's width (scaled to fit)
-      let currentX = span.startTime;
+  // Sum of all children durations (used for proportional scaling)
+  const childSum = span.children.reduce((sum, c) => sum + c.duration, 0);
+
+  if (isParallelGroup) {
+    // Concurrent children: scale them to fit sequentially within parent's width
+    const scale = childSum > 0 ? span.duration / childSum : 1;
+    let currentXNorm = span.x; // normalized x position
+
+    for (const child of span.children) {
+      const scaledWidthNorm = (child.duration * scale) / totalDuration;
+      // Preserve wall-clock for tooltip
+      child.wallClockValue = child.duration;
+      child.scaledValue = child.duration * scale;
+      // Set visual position
+      child.x = currentXNorm;
+      child.width = scaledWidthNorm;
+      // Recursively layout grandchildren within this child's visual bounds
+      calculateLayoutScaled(child, totalDuration, child.x, child.width);
+      currentXNorm += scaledWidthNorm;
+    }
+  } else {
+    // Sequential children: lay out proportionally within parent's visual bounds
+    // Each child gets width proportional to its duration relative to siblings
+    if (childSum <= 0) {
+      // All zero-duration children: distribute evenly
+      const evenWidth = span.width / span.children.length;
+      let currentXNorm = span.x;
       for (const child of span.children) {
-        const scaledDuration = child.duration * scale;
-        // Preserve wall-clock for tooltip
-        child.wallClockValue = child.duration;
-        // Override start/end for scaled layout
-        const origStart = child.startTime;
-        const origEnd = child.endTime;
-        child.startTime = currentX;
-        child.endTime = currentX + scaledDuration;
-        child.scaledValue = scaledDuration;
-        // Recursively layout (children of this child use their own proportions)
-        calculateLayoutScaled(child, totalDuration);
-        // Restore original times for tooltip display
-        child.startTime = origStart;
-        child.endTime = origEnd;
-        // But keep the scaled x/width
-        child.x = currentX / totalDuration;
-        child.width = scaledDuration / totalDuration;
-        currentX += scaledDuration;
-      }
-
-      // In scaled mode, children are sequential (no lane offsets needed)
-      // But we still need to set depth correctly
-      for (const child of span.children) {
-        // All children at same depth (sequential in scaled view)
-        // No lane offset needed
+        child.x = currentXNorm;
+        child.width = evenWidth;
+        calculateLayoutScaled(child, totalDuration, child.x, child.width);
+        currentXNorm += evenWidth;
       }
     } else {
+      // Self-time gets the remaining space after children
+      // Children share the parent's width proportionally
+      let currentXNorm = span.x;
       for (const child of span.children) {
-        calculateLayoutScaled(child, totalDuration);
+        const childProportion = child.duration / (childSum > span.duration ? childSum : span.duration);
+        const childWidthNorm = childProportion * span.width;
+        child.x = currentXNorm;
+        child.width = childWidthNorm;
+        calculateLayoutScaled(child, totalDuration, child.x, child.width);
+        currentXNorm += childWidthNorm;
       }
     }
   }
