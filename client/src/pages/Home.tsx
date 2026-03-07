@@ -100,6 +100,12 @@ export default function Home() {
   // Paper-stack parallel pages state
   const [activeParallelPages, setActiveParallelPages] = useState<Map<string, number>>(new Map());
 
+  // Zoom level tracking
+  const [zoomLevel, setZoomLevel] = useState(1);
+
+  // Area-zoom mode
+  const [areaZoomActive, setAreaZoomActive] = useState(false);
+
   // ─── Breadcrumb path ──────────────────────────────────────────────────────
   const breadcrumbPath = useMemo(() => {
     if (!focusedSpan || !flameData) return [];
@@ -419,9 +425,21 @@ export default function Home() {
                 onResetFocus={handleResetFocus}
                 totalDuration={flameData.totalDuration}
                 spanCount={flameData.allSpans.length}
-                onZoomIn={() => flameGraphRef.current?.zoomIn()}
-                onZoomOut={() => flameGraphRef.current?.zoomOut()}
-                onResetZoom={() => flameGraphRef.current?.resetZoom()}
+                onZoomIn={() => {
+                  flameGraphRef.current?.zoomIn();
+                  setTimeout(() => setZoomLevel(flameGraphRef.current?.getZoomLevel() ?? 1), 0);
+                }}
+                onZoomOut={() => {
+                  flameGraphRef.current?.zoomOut();
+                  setTimeout(() => setZoomLevel(flameGraphRef.current?.getZoomLevel() ?? 1), 0);
+                }}
+                onResetZoom={() => {
+                  flameGraphRef.current?.resetZoom();
+                  setZoomLevel(1);
+                }}
+                zoomLevel={zoomLevel}
+                areaZoomActive={areaZoomActive}
+                onToggleAreaZoom={() => setAreaZoomActive(prev => !prev)}
               />
 
               {/* Breadcrumb navigation */}
@@ -447,6 +465,11 @@ export default function Home() {
                       focusedSpan={focusedSpan}
                       activeParallelPages={activeParallelPages}
                       onCycleParallelPage={handleCycleParallelPage}
+                      areaZoomActive={areaZoomActive}
+                      onAreaZoomComplete={() => {
+                        setAreaZoomActive(false);
+                        setTimeout(() => setZoomLevel(flameGraphRef.current?.getZoomLevel() ?? 1), 0);
+                      }}
                     />
                   </div>
                 )}

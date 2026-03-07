@@ -1,7 +1,7 @@
 /**
  * Toolbar — Flame graph control bar
  * Design: Observatory dark console
- * Features: search, view mode toggle, render mode toggle, color mode, reset
+ * Features: search, view mode toggle, render mode toggle, color mode, zoom controls, area-zoom, reset
  */
 
 import {
@@ -18,6 +18,7 @@ import {
   ZoomOut,
   Clock,
   Scale,
+  Scan,
 } from "lucide-react";
 import type { RenderMode } from "@/lib/flameEngine";
 
@@ -43,6 +44,15 @@ interface ToolbarProps {
   onZoomIn?: () => void;
   onZoomOut?: () => void;
   onResetZoom?: () => void;
+  zoomLevel?: number;
+  areaZoomActive?: boolean;
+  onToggleAreaZoom?: () => void;
+}
+
+function formatZoom(zoom: number): string {
+  if (zoom >= 100) return `${Math.round(zoom)}x`;
+  if (zoom >= 10) return `${zoom.toFixed(1)}x`;
+  return `${zoom.toFixed(1)}x`;
 }
 
 export default function Toolbar({
@@ -63,7 +73,12 @@ export default function Toolbar({
   onZoomIn,
   onZoomOut,
   onResetZoom,
+  zoomLevel = 1,
+  areaZoomActive,
+  onToggleAreaZoom,
 }: ToolbarProps) {
+  const isZoomed = zoomLevel > 1.01;
+
   return (
     <div className="flex items-center gap-2 px-3 py-2 bg-[#0D1117] border-b border-[#21262D]">
       {/* Search */}
@@ -192,24 +207,44 @@ export default function Toolbar({
       <div className="flex items-center bg-[#161B22] rounded border border-[#21262D]">
         <button
           onClick={onZoomOut}
-          className="p-1.5 rounded-l text-[#8B949E] hover:text-[#E6EDF3] hover:bg-[#21262D] transition-colors"
-          title="Zoom out"
+          className={`p-1.5 rounded-l transition-colors ${
+            isZoomed
+              ? 'text-[#E6EDF3] hover:bg-[#21262D]'
+              : 'text-[#484F58] cursor-not-allowed'
+          }`}
+          title="Zoom out (÷2)"
+          disabled={!isZoomed}
         >
           <ZoomOut size={14} />
         </button>
         <button
           onClick={onResetZoom}
-          className="px-2 py-1.5 text-[10px] font-mono text-[#8B949E] hover:text-[#E6EDF3] hover:bg-[#21262D] transition-colors border-x border-[#21262D]"
-          title="Reset zoom"
+          className={`px-2 py-1.5 text-[10px] font-mono transition-colors border-x border-[#21262D] min-w-[42px] text-center ${
+            isZoomed
+              ? 'text-[#00D4FF] hover:bg-[#21262D] font-bold'
+              : 'text-[#6E7681] hover:text-[#8B949E] hover:bg-[#21262D]'
+          }`}
+          title={isZoomed ? `Current zoom: ${formatZoom(zoomLevel)} — Click to reset` : 'Zoom level: 1x'}
         >
-          1:1
+          {isZoomed ? formatZoom(zoomLevel) : '1:1'}
         </button>
         <button
           onClick={onZoomIn}
-          className="p-1.5 rounded-r text-[#8B949E] hover:text-[#E6EDF3] hover:bg-[#21262D] transition-colors"
-          title="Zoom in"
+          className="p-1.5 text-[#8B949E] hover:text-[#E6EDF3] hover:bg-[#21262D] transition-colors"
+          title="Zoom in (×2)"
         >
           <ZoomIn size={14} />
+        </button>
+        <button
+          onClick={onToggleAreaZoom}
+          className={`p-1.5 rounded-r transition-colors border-l border-[#21262D] ${
+            areaZoomActive
+              ? 'bg-[#00D4FF]/20 text-[#00D4FF] border-[#00D4FF]/30'
+              : 'text-[#8B949E] hover:text-[#E6EDF3] hover:bg-[#21262D]'
+          }`}
+          title={areaZoomActive ? 'Area zoom active — drag on the flame graph to select a region' : 'Area zoom — drag to select a region to zoom into'}
+        >
+          <Scan size={14} />
         </button>
       </div>
 

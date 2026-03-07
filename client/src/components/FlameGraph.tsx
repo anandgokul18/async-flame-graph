@@ -12,6 +12,12 @@
  * 
  * DPR-aware: Canvas buffer is scaled by devicePixelRatio for crisp rendering
  * on retina/HiDPI displays.
+ * 
+ * Zoom: Virtual zoom via viewState { offsetX, zoom }.
+ *   - offsetX is in normalized [0..1] space (fraction of total width)
+ *   - zoom is a multiplier (1 = fit all, 10 = 10x magnification)
+ *   - Custom scrollbar maps to the virtual viewport
+ *   - Area-zoom: drag a rectangle to zoom into a region
  */
 
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, forwardRef } from "react";
@@ -26,6 +32,11 @@ const MIN_BAR_WIDTH = 2;
 const FONT_SIZE = 11;
 const TIMELINE_HEIGHT = 36;
 const PADDING_TOP = 10;
+const SCROLLBAR_HEIGHT = 14;
+const SCROLLBAR_TRACK_COLOR = 'rgba(33, 38, 45, 0.8)';
+const SCROLLBAR_THUMB_COLOR = 'rgba(0, 212, 255, 0.35)';
+const SCROLLBAR_THUMB_HOVER_COLOR = 'rgba(0, 212, 255, 0.55)';
+const SCROLLBAR_THUMB_ACTIVE_COLOR = 'rgba(0, 212, 255, 0.7)';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -38,12 +49,15 @@ interface FlameGraphProps {
   focusedSpan?: ProcessedSpan | null;
   activeParallelPages: Map<string, number>;
   onCycleParallelPage?: (groupId: string) => void;
+  areaZoomActive?: boolean;
+  onAreaZoomComplete?: () => void;
 }
 
 export interface FlameGraphHandle {
   zoomIn: () => void;
   zoomOut: () => void;
   resetZoom: () => void;
+  getZoomLevel: () => number;
 }
 
 interface ViewState {
@@ -97,7 +111,6 @@ function getHitSpan(
   const focusX = focusedSpan ? focusedSpan.x : 0;
   const focusW = focusedSpan ? focusedSpan.width : 1;
 
-  // Use CSS-pixel coordinates (not DPR-scaled) for hit detection
   const sorted = [...spans].sort((a, b) => b.depth - a.depth);
 
   for (const span of sorted) {
@@ -212,6 +225,71 @@ function drawPaperStackLayers(
   }
 }
 
+// ─── Custom Scrollbar Drawing ───────────────────────────────────────────────
+
+function drawScrollbar(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  canvasHeight: number,
+  viewState: ViewState,
+  isHovered: boolean,
+  isActive: boolean,
+) {
+  if (viewState.zoom <= 1) return; // No scrollbar needed at 1x
+
+  const y = canvasHeight - SCROLLBAR_HEIGHT;
+
+  // Track
+  ctx.fillStyle = SCROLLBAR_TRACK_COLOR;
+  ctx.fillRect(0, y, width, SCROLLBAR_HEIGHT);
+
+  // Top border
+  ctx.strokeStyle = '#30363D';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, y + 0.5);
+  ctx.lineTo(width, y + 0.5);
+  ctx.stroke();
+
+  // Thumb
+  const thumbWidth = Math.max(30, width / viewState.zoom);
+  const thumbX = (-viewState.offsetX / viewState.zoom) * width;
+  const thumbPad = 2;
+
+  ctx.fillStyle = isActive
+    ? SCROLLBAR_THUMB_ACTIVE_COLOR
+    : isHovered
+      ? SCROLLBAR_THUMB_HOVER_COLOR
+      : SCROLLBAR_THUMB_COLOR;
+
+  ctx.beginPath();
+  ctx.roundRect(
+    Math.max(0, Math.min(thumbX, width - thumbWidth)),
+    y + thumbPad,
+    thumbWidth,
+    SCROLLBAR_HEIGHT - thumbPad * 2,
+    4
+  );
+  ctx.fill();
+}
+
+function getScrollbarThumbRect(
+  width: number,
+  canvasHeight: number,
+  viewState: ViewState,
+): { x: number; y: number; w: number; h: number } | null {
+  if (viewState.zoom <= 1) return null;
+  const y = canvasHeight - SCROLLBAR_HEIGHT;
+  const thumbWidth = Math.max(30, width / viewState.zoom);
+  const thumbX = (-viewState.offsetX / viewState.zoom) * width;
+  return {
+    x: Math.max(0, Math.min(thumbX, width - thumbWidth)),
+    y: y + 2,
+    w: thumbWidth,
+    h: SCROLLBAR_HEIGHT - 4,
+  };
+}
+
 // ─── Badge position info for HTML overlays ──────────────────────────────────
 
 interface BadgeInfo {
@@ -234,6 +312,8 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
   focusedSpan,
   activeParallelPages,
   onCycleParallelPage,
+  areaZoomActive,
+  onAreaZoomComplete,
 }, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -245,6 +325,16 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
   const animFrameRef = useRef<number>(0);
   const [badges, setBadges] = useState<BadgeInfo[]>([]);
 
+  // Scrollbar state
+  const isScrollbarHovered = useRef(false);
+  const isScrollbarDragging = useRef(false);
+  const scrollbarDragStart = useRef({ mouseX: 0, offsetX: 0 });
+
+  // Area-zoom state
+  const [areaZoomRect, setAreaZoomRect] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
+  const isAreaZoomDragging = useRef(false);
+  const areaZoomStart = useRef({ x: 0, y: 0 });
+
   // Get device pixel ratio for crisp rendering
   const dpr = typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1;
 
@@ -253,8 +343,8 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
     return TIMELINE_HEIGHT + PADDING_TOP + (data.maxDepth + 1) * (ROW_HEIGHT + ROW_GAP) + 20;
   }, [data.maxDepth]);
 
-  // CSS pixel height
-  const cssHeight = Math.max(canvasSize.height, canvasHeight);
+  // CSS pixel height (add scrollbar space when zoomed)
+  const cssHeight = Math.max(canvasSize.height, canvasHeight) + (viewState.zoom > 1 ? SCROLLBAR_HEIGHT : 0);
 
   // Resize observer
   useEffect(() => {
@@ -327,7 +417,6 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
 
     // Collect badge positions — we place badges on PARENT bars (concurrent nodes)
     const newBadges: BadgeInfo[] = [];
-    // Track which groupIds we've already added badges for (to avoid duplicates)
     const badgeGroupIds = new Set<string>();
 
     // Draw spans
@@ -339,7 +428,7 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
       const pixelW = Math.max(MIN_BAR_WIDTH, normalizedW * viewState.zoom * w);
       const pixelY = TIMELINE_HEIGHT + PADDING_TOP + span.depth * (ROW_HEIGHT + ROW_GAP);
 
-      // Check if this span is a concurrent PARENT (has children tagged with parallelGroupId = this span's id)
+      // Check if this span is a concurrent PARENT
       const isParallelParent = span.isConcurrent && span.children.length > 1 &&
         span.children.some(c => c.parallelGroupId === span.id);
 
@@ -348,7 +437,7 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
         drawPaperStackLayers(ctx, pixelX, pixelY, pixelW, span.children.length);
       }
 
-      // Also draw paper-stack layers on child if it's wide enough (for visual continuity)
+      // Also draw paper-stack layers on child if it's wide enough
       if (
         span.parallelGroupId !== undefined &&
         span.parallelSiblingCount !== undefined &&
@@ -394,7 +483,6 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
       // Collect badge info for HTML overlay — placed on the PARENT bar
       if (isParallelParent && pixelW > 30 && !badgeGroupIds.has(span.id)) {
         const groupId = span.id;
-        // Default to largest child (matching engine logic)
         const defaultIdx = span.children.reduce((maxI, c, i, arr) => c.duration > arr[maxI].duration ? i : maxI, 0);
         const activeIdx = activeParallelPages.has(groupId) ? activeParallelPages.get(groupId)! : defaultIdx;
         const safeIdx = Math.min(activeIdx, span.children.length - 1);
@@ -420,36 +508,77 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
 
-        const textY = pixelY + ROW_HEIGHT / 2;
-        const textX = pixelX + 4;
-        const badgeReserve = hasBadgeOnThisSpan ? 50 : 0;
-        const maxTextWidth = pixelW - 8 - badgeReserve;
+        const textPad = 4;
+        const badgeReserve = hasBadgeOnThisSpan ? 48 : 0;
+        const maxTextWidth = pixelW - textPad * 2 - badgeReserve;
 
-        if (maxTextWidth > 20) {
-          let text = span.name;
-          const timeStr = ` (${formatDuration(span.duration)})`;
+        if (maxTextWidth > 10) {
+          const label = `${span.name} (${formatDuration(span.duration)})`;
+          let displayText = label;
 
-          if (pixelW > 150 + badgeReserve) {
-            text = text + timeStr;
-          }
-
-          const measured = ctx.measureText(text);
+          const measured = ctx.measureText(label);
           if (measured.width > maxTextWidth) {
-            while (text.length > 3 && ctx.measureText(text + '...').width > maxTextWidth) {
-              text = text.slice(0, -1);
+            let truncated = label;
+            while (ctx.measureText(truncated + '…').width > maxTextWidth && truncated.length > 0) {
+              truncated = truncated.slice(0, -1);
             }
-            text = text + '...';
+            displayText = truncated + '…';
           }
 
-          ctx.fillText(text, textX, textY);
+          ctx.fillText(displayText, pixelX + textPad, pixelY + ROW_HEIGHT / 2);
         }
       }
 
-      ctx.globalAlpha = 1;
+      if (isSearchDimmed) {
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    // Draw custom scrollbar
+    drawScrollbar(ctx, w, cssHeight, viewState, isScrollbarHovered.current, isScrollbarDragging.current);
+
+    // Draw area-zoom selection rectangle
+    if (areaZoomRect) {
+      const x = Math.min(areaZoomRect.startX, areaZoomRect.endX);
+      const y = Math.min(areaZoomRect.startY, areaZoomRect.endY);
+      const rw = Math.abs(areaZoomRect.endX - areaZoomRect.startX);
+      const rh = Math.abs(areaZoomRect.endY - areaZoomRect.startY);
+
+      // Semi-transparent overlay outside selection
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+      // Top
+      ctx.fillRect(0, 0, w, y);
+      // Bottom
+      ctx.fillRect(0, y + rh, w, h - y - rh);
+      // Left
+      ctx.fillRect(0, y, x, rh);
+      // Right
+      ctx.fillRect(x + rw, y, w - x - rw, rh);
+
+      // Selection border
+      ctx.strokeStyle = 'rgba(0, 212, 255, 0.9)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 3]);
+      ctx.strokeRect(x, y, rw, rh);
+      ctx.setLineDash([]);
+
+      // Selection fill
+      ctx.fillStyle = 'rgba(0, 212, 255, 0.08)';
+      ctx.fillRect(x, y, rw, rh);
+
+      // Label
+      if (rw > 60) {
+        ctx.font = `bold 11px 'JetBrains Mono', monospace`;
+        ctx.fillStyle = 'rgba(0, 212, 255, 0.9)';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText('Release to zoom', x + rw / 2, y - 4);
+      }
     }
 
     setBadges(newBadges);
-  }, [canvasSize, cssHeight, dpr, data, viewState, visibleSpans, hoveredSpan, searchQuery, searchMatches, focusedSpan, activeParallelPages]);
+  }, [canvasSize.width, cssHeight, dpr, data, viewState, focusedSpan, visibleSpans,
+    hoveredSpan, searchQuery, searchMatches, activeParallelPages, areaZoomRect]);
 
   // Render on state change
   useEffect(() => {
@@ -458,6 +587,46 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
     return () => cancelAnimationFrame(animFrameRef.current);
   }, [render]);
 
+  // ─── Helper: clamp offsetX so viewport stays within [0..1] ────────────
+
+  const clampOffset = useCallback((offsetX: number, zoom: number): number => {
+    if (zoom <= 1) return 0;
+    // The visible window in normalized space is [(-offsetX/zoom), (-offsetX/zoom + 1/zoom)]
+    // We want: -offsetX/zoom >= 0  =>  offsetX <= 0
+    // We want: -offsetX/zoom + 1/zoom <= 1  =>  offsetX >= -(zoom - 1)/zoom * zoom = 1 - zoom
+    // So: (1 - zoom) <= offsetX <= 0
+    return Math.max(1 - zoom, Math.min(0, offsetX));
+  }, []);
+
+  // ─── Helper: find smallest visible span in a pixel region ─────────────
+
+  const findSmallestSpanInRegion = useCallback((
+    x1: number, x2: number, y1: number, y2: number,
+  ): ProcessedSpan | null => {
+    const focusX = focusedSpan ? focusedSpan.x : 0;
+    const focusW = focusedSpan ? focusedSpan.width : 1;
+    let smallest: ProcessedSpan | null = null;
+    let smallestW = Infinity;
+
+    for (const span of visibleSpans) {
+      const normalizedX = focusW > 0 ? (span.x - focusX) / focusW : span.x;
+      const normalizedW = focusW > 0 ? span.width / focusW : span.width;
+
+      const pixelX = (normalizedX * viewState.zoom + viewState.offsetX) * canvasSize.width;
+      const pixelW = normalizedW * viewState.zoom * canvasSize.width;
+      const pixelY = TIMELINE_HEIGHT + PADDING_TOP + span.depth * (ROW_HEIGHT + ROW_GAP);
+
+      // Check if span overlaps with the selection rectangle
+      if (pixelX + pixelW >= x1 && pixelX <= x2 && pixelY + ROW_HEIGHT >= y1 && pixelY <= y2) {
+        if (pixelW < smallestW) {
+          smallestW = pixelW;
+          smallest = span;
+        }
+      }
+    }
+    return smallest;
+  }, [visibleSpans, viewState, canvasSize.width, focusedSpan]);
+
   // ─── Event Handlers (all in CSS-pixel coordinates) ────────────────────────
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -465,15 +634,58 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
     if (!canvas) return;
 
     const rect = canvas.getBoundingClientRect();
-    // Convert client coords to CSS-pixel coords (NOT canvas buffer coords)
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
 
+    // Area-zoom dragging
+    if (areaZoomActive && isAreaZoomDragging.current) {
+      setAreaZoomRect(prev => prev ? {
+        ...prev,
+        endX: mouseX,
+        endY: mouseY,
+      } : null);
+      canvas.style.cursor = 'crosshair';
+      return;
+    }
+
+    // Scrollbar interaction
+    if (isScrollbarDragging.current) {
+      const dx = mouseX - scrollbarDragStart.current.mouseX;
+      const normalizedDx = (dx / canvasSize.width) * viewState.zoom;
+      const newOffsetX = clampOffset(scrollbarDragStart.current.offsetX - normalizedDx, viewState.zoom);
+      setViewState(prev => ({ ...prev, offsetX: newOffsetX }));
+      canvas.style.cursor = 'grabbing';
+      return;
+    }
+
+    // Check if hovering over scrollbar
+    const thumbRect = getScrollbarThumbRect(canvasSize.width, cssHeight, viewState);
+    if (thumbRect && mouseY >= thumbRect.y - 2 && mouseY <= thumbRect.y + thumbRect.h + 2) {
+      isScrollbarHovered.current = true;
+      canvas.style.cursor = 'pointer';
+      // Trigger re-render for hover effect
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = requestAnimationFrame(render);
+      return;
+    } else if (isScrollbarHovered.current) {
+      isScrollbarHovered.current = false;
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = requestAnimationFrame(render);
+    }
+
+    // Area-zoom mode cursor
+    if (areaZoomActive) {
+      canvas.style.cursor = 'crosshair';
+      return;
+    }
+
+    // Normal pan dragging
     if (isDragging.current) {
       const dx = (e.clientX - dragStart.current.x) / canvasSize.width;
+      const newOffsetX = clampOffset(dragStart.current.offsetX + dx, viewState.zoom);
       setViewState(prev => ({
         ...prev,
-        offsetX: dragStart.current.offsetX + dx,
+        offsetX: newOffsetX,
       }));
       return;
     }
@@ -485,14 +697,108 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
     onSpanHover?.(hit, e.clientX, e.clientY);
 
     canvas.style.cursor = hit ? 'pointer' : 'default';
-  }, [visibleSpans, viewState, canvasSize.width, focusedSpan, onSpanHover]);
+  }, [visibleSpans, viewState, canvasSize.width, cssHeight, focusedSpan, onSpanHover,
+    clampOffset, areaZoomActive, render]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    // Check scrollbar click
+    const thumbRect = getScrollbarThumbRect(canvasSize.width, cssHeight, viewState);
+    if (thumbRect && mouseY >= thumbRect.y - 2 && mouseY <= thumbRect.y + thumbRect.h + 2) {
+      if (mouseX >= thumbRect.x && mouseX <= thumbRect.x + thumbRect.w) {
+        // Clicked on thumb — start dragging
+        isScrollbarDragging.current = true;
+        scrollbarDragStart.current = { mouseX, offsetX: viewState.offsetX };
+      } else {
+        // Clicked on track — jump to position
+        const trackFraction = mouseX / canvasSize.width;
+        const newOffsetX = clampOffset(-trackFraction * viewState.zoom + 0.5, viewState.zoom);
+        setViewState(prev => ({ ...prev, offsetX: newOffsetX }));
+      }
+      return;
+    }
+
+    // Area-zoom mode
+    if (areaZoomActive) {
+      isAreaZoomDragging.current = true;
+      areaZoomStart.current = { x: mouseX, y: mouseY };
+      setAreaZoomRect({ startX: mouseX, startY: mouseY, endX: mouseX, endY: mouseY });
+      return;
+    }
+
+    // Normal pan
     isDragging.current = true;
     dragStart.current = { x: e.clientX, offsetX: viewState.offsetX };
-  }, [viewState.offsetX]);
+  }, [viewState, canvasSize.width, cssHeight, clampOffset, areaZoomActive]);
 
   const handleMouseUp = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    // Scrollbar drag end
+    if (isScrollbarDragging.current) {
+      isScrollbarDragging.current = false;
+      return;
+    }
+
+    // Area-zoom drag end
+    if (isAreaZoomDragging.current && areaZoomRect) {
+      isAreaZoomDragging.current = false;
+
+      const x1 = Math.min(areaZoomRect.startX, areaZoomRect.endX);
+      const x2 = Math.max(areaZoomRect.startX, areaZoomRect.endX);
+      const y1 = Math.min(areaZoomRect.startY, areaZoomRect.endY);
+      const y2 = Math.max(areaZoomRect.startY, areaZoomRect.endY);
+      const selW = x2 - x1;
+
+      setAreaZoomRect(null);
+
+      if (selW < 10) {
+        // Too small — cancel
+        onAreaZoomComplete?.();
+        return;
+      }
+
+      // Find smallest span in the selection region
+      const smallest = findSmallestSpanInRegion(x1, x2, y1, y2);
+
+      const focusX = focusedSpan ? focusedSpan.x : 0;
+      const focusW = focusedSpan ? focusedSpan.width : 1;
+
+      if (smallest) {
+        // Calculate zoom so that the smallest span covers at least 15% of screen
+        const normalizedW = focusW > 0 ? smallest.width / focusW : smallest.width;
+        const currentPixelW = normalizedW * viewState.zoom * canvasSize.width;
+        const targetPixelW = canvasSize.width * 0.15; // 15% of screen
+        const zoomMultiplier = targetPixelW / currentPixelW;
+        const newZoom = Math.min(500, viewState.zoom * zoomMultiplier);
+
+        // Center on the selection center
+        const selCenterPixel = (x1 + x2) / 2;
+        const selCenterNorm = (selCenterPixel / canvasSize.width - viewState.offsetX) / viewState.zoom;
+        const newOffsetX = clampOffset(0.5 - selCenterNorm * newZoom, newZoom);
+
+        setViewState({ zoom: newZoom, offsetX: newOffsetX });
+      } else {
+        // No spans in selection — just zoom to the selected horizontal region
+        const leftNorm = (x1 / canvasSize.width - viewState.offsetX) / viewState.zoom;
+        const rightNorm = (x2 / canvasSize.width - viewState.offsetX) / viewState.zoom;
+        const regionW = rightNorm - leftNorm;
+        const newZoom = Math.min(500, 1 / regionW);
+        const centerNorm = (leftNorm + rightNorm) / 2;
+        const newOffsetX = clampOffset(0.5 - centerNorm * newZoom, newZoom);
+
+        setViewState({ zoom: newZoom, offsetX: newOffsetX });
+      }
+
+      onAreaZoomComplete?.();
+      return;
+    }
+
+    // Normal click/pan end
     if (isDragging.current) {
       const dx = Math.abs(e.clientX - dragStart.current.x);
       isDragging.current = false;
@@ -501,7 +807,6 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
         const canvas = canvasRef.current;
         if (!canvas) return;
         const rect = canvas.getBoundingClientRect();
-        // CSS-pixel coords
         const mouseX = e.clientX - rect.left;
         const mouseY = e.clientY - rect.top;
 
@@ -514,43 +819,54 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
         }
       }
     }
-  }, [visibleSpans, viewState, canvasSize.width, focusedSpan, onSpanClick]);
+  }, [visibleSpans, viewState, canvasSize.width, focusedSpan, onSpanClick,
+    areaZoomRect, findSmallestSpanInRegion, clampOffset, onAreaZoomComplete]);
 
   const handleMouseLeave = useCallback(() => {
     isDragging.current = false;
+    isScrollbarDragging.current = false;
+    if (isAreaZoomDragging.current) {
+      isAreaZoomDragging.current = false;
+      setAreaZoomRect(null);
+      onAreaZoomComplete?.();
+    }
     setHoveredSpan(null);
     onSpanHover?.(null, 0, 0);
-  }, [onSpanHover]);
+  }, [onSpanHover, onAreaZoomComplete]);
 
   // ─── Imperative zoom controls (exposed via ref) ────────────────────────
 
   const zoomIn = useCallback(() => {
     setViewState(prev => {
-      const newZoom = Math.min(500, prev.zoom * 1.4);
-      const center = 0.5;
-      const newOffsetX = center - (center - prev.offsetX) * (newZoom / prev.zoom);
+      const newZoom = Math.min(500, prev.zoom * 2);
+      // Zoom centered on the current viewport center
+      const viewportCenterNorm = (-prev.offsetX + 0.5) / prev.zoom;
+      const newOffsetX = clampOffset(0.5 - viewportCenterNorm * newZoom, newZoom);
       return { zoom: newZoom, offsetX: newOffsetX };
     });
-  }, []);
+  }, [clampOffset]);
 
   const zoomOut = useCallback(() => {
     setViewState(prev => {
-      const newZoom = Math.max(1, prev.zoom / 1.4);
-      const center = 0.5;
-      const newOffsetX = center - (center - prev.offsetX) * (newZoom / prev.zoom);
+      const newZoom = Math.max(1, prev.zoom / 2);
+      const viewportCenterNorm = (-prev.offsetX + 0.5) / prev.zoom;
+      const newOffsetX = clampOffset(0.5 - viewportCenterNorm * newZoom, newZoom);
       return { zoom: newZoom, offsetX: newOffsetX };
     });
-  }, []);
+  }, [clampOffset]);
 
   const resetZoom = useCallback(() => {
     setViewState({ offsetX: 0, zoom: 1 });
   }, []);
 
+  const getZoomLevel = useCallback(() => viewState.zoom, [viewState.zoom]);
+
   useImperativeHandle(ref, () => ({
     zoomIn,
     zoomOut,
     resetZoom,
-  }), [zoomIn, zoomOut, resetZoom]);
+    getZoomLevel,
+  }), [zoomIn, zoomOut, resetZoom, getZoomLevel]);
 
   // Reset view
   useEffect(() => {
@@ -567,6 +883,7 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
           width: canvasSize.width,
           height: cssHeight,
           display: 'block',
+          cursor: areaZoomActive ? 'crosshair' : undefined,
         }}
         onMouseMove={handleMouseMove}
         onMouseDown={handleMouseDown}
