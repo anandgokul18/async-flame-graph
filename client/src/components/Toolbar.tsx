@@ -1,7 +1,7 @@
 /**
  * Toolbar — Flame graph control bar
  * Design: Observatory console — supports light/dark mode via CSS variables
- * Features: search, view mode toggle, render mode toggle, color mode, zoom controls, area-zoom, reset
+ * Features: search, view mode toggle, render mode toggle, color mode, zoom controls, area-zoom, theme toggle, reset
  */
 
 import {
@@ -47,6 +47,8 @@ interface ToolbarProps {
   zoomLevel?: number;
   areaZoomActive?: boolean;
   onToggleAreaZoom?: () => void;
+  theme?: 'light' | 'dark';
+  onToggleTheme?: () => void;
 }
 
 function formatZoom(zoom: number): string {
@@ -76,6 +78,8 @@ export default function Toolbar({
   zoomLevel = 1,
   areaZoomActive,
   onToggleAreaZoom,
+  theme = 'dark',
+  onToggleTheme,
 }: ToolbarProps) {
   const isZoomed = zoomLevel > 1.01;
 
@@ -245,6 +249,35 @@ export default function Toolbar({
           title={areaZoomActive ? 'Area zoom active — drag on the flame graph to select a region' : 'Area zoom — drag to select a region to zoom into'}
         >
           <Scan size={14} />
+        </button>
+      </div>
+
+      {/* Divider */}
+      <div className="w-px h-5 bg-fg-border" />
+
+      {/* Theme toggle: Light / Dark — styled like Wall-Clock / Scaled */}
+      <div className="flex items-center bg-fg-panel rounded border border-fg-border">
+        <button
+          onClick={() => theme !== 'light' && onToggleTheme?.()}
+          className={`flex items-center gap-1 px-2 py-1.5 rounded-l text-[11px] transition-colors ${
+            theme === 'light'
+              ? 'bg-fg-active text-fg-text font-medium'
+              : 'text-fg-text-muted hover:text-fg-text-secondary'
+          }`}
+          title="Switch to light mode"
+        >
+          <span className="hidden sm:inline">Light</span>
+        </button>
+        <button
+          onClick={() => theme !== 'dark' && onToggleTheme?.()}
+          className={`flex items-center gap-1 px-2 py-1.5 rounded-r text-[11px] transition-colors ${
+            theme === 'dark'
+              ? 'bg-fg-active text-fg-text font-medium'
+              : 'text-fg-text-muted hover:text-fg-text-secondary'
+          }`}
+          title="Switch to dark mode"
+        >
+          <span className="hidden sm:inline">Dark</span>
         </button>
       </div>
 

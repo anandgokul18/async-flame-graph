@@ -17,8 +17,6 @@ import {
   Info,
   Link2,
   Check,
-  Sun,
-  Moon,
 } from "lucide-react";
 import FlameGraph from "@/components/FlameGraph";
 import type { FlameGraphHandle } from "@/components/FlameGraph";
@@ -322,14 +320,6 @@ export default function Home() {
             </button>
           )}
 
-          {/* Theme toggle */}
-          <button
-            onClick={toggleTheme}
-            className="p-1.5 rounded hover:bg-fg-hover text-fg-text-secondary hover:text-fg-text transition-colors"
-            title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
-          >
-            {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
-          </button>
 
           <button
             onClick={() => setShowInfo(!showInfo)}
@@ -455,6 +445,8 @@ export default function Home() {
                 zoomLevel={zoomLevel}
                 areaZoomActive={areaZoomActive}
                 onToggleAreaZoom={() => setAreaZoomActive(prev => !prev)}
+                theme={theme}
+                onToggleTheme={toggleTheme}
               />
 
               {/* Breadcrumb navigation */}

@@ -66,26 +66,26 @@
 :root {
   --radius: 0.5rem;
 
-  /* shadcn/ui semantic tokens — light */
-  --background: oklch(1 0 0);
+  /* shadcn/ui semantic tokens — light (warm grays) */
+  --background: oklch(0.95 0.003 250);
   --foreground: oklch(0.15 0.01 250);
-  --card: oklch(0.97 0.003 250);
+  --card: oklch(0.93 0.004 250);
   --card-foreground: oklch(0.15 0.01 250);
-  --popover: oklch(1 0 0);
+  --popover: oklch(0.94 0.003 250);
   --popover-foreground: oklch(0.15 0.01 250);
-  --primary: oklch(0.55 0.18 240);
-  --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.95 0.005 250);
-  --secondary-foreground: oklch(0.35 0.01 250);
-  --muted: oklch(0.95 0.005 250);
-  --muted-foreground: oklch(0.5 0.01 250);
-  --accent: oklch(0.95 0.005 250);
+  --primary: oklch(0.45 0.16 240);
+  --primary-foreground: oklch(0.98 0 0);
+  --secondary: oklch(0.91 0.004 250);
+  --secondary-foreground: oklch(0.3 0.01 250);
+  --muted: oklch(0.91 0.004 250);
+  --muted-foreground: oklch(0.45 0.01 250);
+  --accent: oklch(0.91 0.004 250);
   --accent-foreground: oklch(0.15 0.01 250);
   --destructive: oklch(0.55 0.2 25);
-  --destructive-foreground: oklch(1 0 0);
-  --border: oklch(0.85 0.005 250);
-  --input: oklch(0.9 0.005 250);
-  --ring: oklch(0.55 0.18 240);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.82 0.005 250);
+  --input: oklch(0.88 0.004 250);
+  --ring: oklch(0.45 0.16 240);
   --chart-1: oklch(0.55 0.18 240);
   --chart-2: oklch(0.65 0.16 80);
   --chart-3: oklch(0.5 0.18 150);
@@ -100,23 +100,23 @@
   --sidebar-primary: oklch(0.55 0.18 240);
   --sidebar-primary-foreground: oklch(1 0 0);
 
-  /* Flame graph tokens — light */
-  --fg-bg: #FFFFFF;
-  --fg-panel: #F6F8FA;
-  --fg-hover: #F3F4F6;
-  --fg-active: #E5E7EB;
-  --fg-border: #D0D7DE;
-  --fg-border-subtle: #E5E7EB;
-  --fg-text: #1F2328;
-  --fg-text-secondary: #57606A;
-  --fg-text-muted: #6E7781;
-  --fg-text-dimmed: #8C959F;
-  --fg-accent: #0078D4;
-  --fg-accent-bg: rgba(0, 120, 212, 0.08);
-  --fg-accent-border: rgba(0, 120, 212, 0.25);
-  --fg-amber: #D97706;
-  --fg-amber-bg: rgba(217, 119, 6, 0.08);
-  --fg-amber-border: rgba(217, 119, 6, 0.2);
+  /* Flame graph tokens — light (warm grays, Manus-style) */
+  --fg-bg: #F0F1F3;
+  --fg-panel: #E8EAED;
+  --fg-hover: #E2E4E8;
+  --fg-active: #D8DBE0;
+  --fg-border: #C4C8CE;
+  --fg-border-subtle: #D8DBE0;
+  --fg-text: #1A1D21;
+  --fg-text-secondary: #4A5058;
+  --fg-text-muted: #636B74;
+  --fg-text-dimmed: #8A929B;
+  --fg-accent: #0066B8;
+  --fg-accent-bg: rgba(0, 102, 184, 0.1);
+  --fg-accent-border: rgba(0, 102, 184, 0.3);
+  --fg-amber: #B45309;
+  --fg-amber-bg: rgba(180, 83, 9, 0.1);
+  --fg-amber-border: rgba(180, 83, 9, 0.25);
 }
 
 /* ─── Dark Theme ─── */
@@ -247,14 +247,14 @@
   height: 8px;
 }
 ::-webkit-scrollbar-track {
-  background: #F6F8FA;
+  background: #E8EAED;
 }
 ::-webkit-scrollbar-thumb {
-  background: #C1C8CF;
+  background: #B0B5BC;
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #A0A8B0;
+  background: #949AA2;
 }
 
 /* Flame graph specific styles */
@@ -285,7 +285,7 @@
 
 /* Glass panel effect */
 .glass-panel {
-  background: rgba(255, 255, 255, 0.92);
+  background: rgba(232, 234, 237, 0.92);
   backdrop-filter: blur(12px);
   border: 1px solid rgba(0, 0, 0, 0.1);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);

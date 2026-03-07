@@ -813,23 +813,25 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
       if (smallest) {
         // Calculate zoom so that the smallest span covers at least 15% of screen
         const normalizedW = focusW > 0 ? smallest.width / focusW : smallest.width;
+        const normalizedX = focusW > 0 ? (smallest.x - focusX) / focusW : smallest.x;
         const targetFraction = 0.15; // 15% of screen
-        const newZoom = Math.min(500, targetFraction / normalizedW);
+        const newZoom = Math.min(500, Math.max(targetFraction / normalizedW, 1 / selRegionW));
 
-        // Center the selection region in the viewport
-        const selCenterNorm = (selLeftNorm + selRightNorm) / 2;
-        // We want selCenterNorm to appear at viewport center (pixel 0.5)
+        // Center the viewport on the SMALLEST SPAN (not the selection center)
+        // This ensures the smallest span is always visible after zooming
+        const spanCenterNorm = normalizedX + normalizedW / 2;
         // pixelX = (normalizedX * newZoom + newOffsetX) * canvasWidth
-        // 0.5 * canvasWidth = (selCenterNorm * newZoom + newOffsetX) * canvasWidth
-        // newOffsetX = 0.5 - selCenterNorm * newZoom
-        const newOffsetX = clampOffset(-selCenterNorm * newZoom + 0.5, newZoom);
+        // We want spanCenterNorm at viewport center (0.5):
+        // 0.5 = spanCenterNorm * newZoom + newOffsetX
+        // newOffsetX = 0.5 - spanCenterNorm * newZoom
+        const newOffsetX = clampOffset(0.5 - spanCenterNorm * newZoom, newZoom);
 
         setViewState({ zoom: newZoom, offsetX: newOffsetX });
       } else {
         // No spans in selection — just zoom to the selected horizontal region
         const newZoom = Math.min(500, 1 / selRegionW);
         const selCenterNorm = (selLeftNorm + selRightNorm) / 2;
-        const newOffsetX = clampOffset(-selCenterNorm * newZoom + 0.5, newZoom);
+        const newOffsetX = clampOffset(0.5 - selCenterNorm * newZoom, newZoom);
 
         setViewState({ zoom: newZoom, offsetX: newOffsetX });
       }
