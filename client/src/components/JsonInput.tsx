@@ -1,6 +1,6 @@
 /**
  * JsonInput — Code-editor style JSON input panel
- * Design: Observatory dark console
+ * Design: Observatory console — supports light/dark mode via CSS variables
  * Features: syntax validation, line numbers, sample data loading
  */
 
@@ -104,22 +104,22 @@ export default function JsonInput({
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-[#21262D] bg-[#0D1117]">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-fg-border bg-fg-bg">
         <div className="flex items-center gap-2">
-          <FileJson size={14} className="text-[#8B949E]" />
-          <span className="text-[11px] font-medium text-[#E6EDF3]">Telemetry JSON</span>
+          <FileJson size={14} className="text-fg-text-secondary" />
+          <span className="text-[11px] font-medium text-fg-text">Telemetry JSON</span>
         </div>
         <div className="flex items-center gap-1">
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="p-1.5 rounded hover:bg-[#21262D] text-[#8B949E] hover:text-[#E6EDF3] transition-colors"
+            className="p-1.5 rounded hover:bg-fg-active text-fg-text-secondary hover:text-fg-text transition-colors"
             title="Upload JSON file"
           >
             <Upload size={13} />
           </button>
           <button
             onClick={() => { onChange(''); }}
-            className="p-1.5 rounded hover:bg-[#21262D] text-[#8B949E] hover:text-[#E6EDF3] transition-colors"
+            className="p-1.5 rounded hover:bg-fg-active text-fg-text-secondary hover:text-fg-text transition-colors"
             title="Clear"
           >
             <Trash2 size={13} />
@@ -127,44 +127,44 @@ export default function JsonInput({
           <div className="relative">
             <button
               onClick={() => setShowSamples(!showSamples)}
-              className="flex items-center gap-1 px-2 py-1 rounded text-[11px] hover:bg-[#21262D] text-[#8B949E] hover:text-[#E6EDF3] transition-colors"
+              className="flex items-center gap-1 px-2 py-1 rounded text-[11px] hover:bg-fg-active text-fg-text-secondary hover:text-fg-text transition-colors"
             >
               Samples <ChevronDown size={11} />
             </button>
             {showSamples && (
               <div className="absolute right-0 top-full mt-1 z-50 glass-panel rounded-md shadow-xl py-1 min-w-[240px]">
-                <div className="px-3 py-1 text-[9px] text-[#6E7681] uppercase tracking-wider">
+                <div className="px-3 py-1 text-[9px] text-fg-text-muted uppercase tracking-wider">
                   Time-based
                 </div>
                 <button
                   onClick={() => loadSample('time')}
-                  className="w-full text-left px-3 py-1.5 text-[11px] text-[#E6EDF3] hover:bg-[#21262D] transition-colors"
+                  className="w-full text-left px-3 py-1.5 text-[11px] text-fg-text hover:bg-fg-active transition-colors"
                 >
                   Async HTTP Request (startTime/endTime)
                 </button>
                 <button
                   onClick={() => loadSample('samples')}
-                  className="w-full text-left px-3 py-1.5 text-[11px] text-[#E6EDF3] hover:bg-[#21262D] transition-colors"
+                  className="w-full text-left px-3 py-1.5 text-[11px] text-fg-text hover:bg-fg-active transition-colors"
                 >
                   CPU Profile (sample-based values)
                 </button>
-                <div className="my-1 border-t border-[#21262D]" />
-                <div className="px-3 py-1 text-[9px] text-[#6E7681] uppercase tracking-wider">
+                <div className="my-1 border-t border-fg-border" />
+                <div className="px-3 py-1 text-[9px] text-fg-text-muted uppercase tracking-wider">
                   Profiler Formats
                 </div>
                 <button
                   onClick={() => loadSample('wall-clock')}
-                  className="w-full text-left px-3 py-1.5 text-[11px] text-[#E6EDF3] hover:bg-[#21262D] transition-colors"
+                  className="w-full text-left px-3 py-1.5 text-[11px] text-fg-text hover:bg-fg-active transition-colors"
                 >
-                  <span className="text-[#00D4FF]">to_dict()</span>
-                  <span className="text-[#6E7681] ml-1">— Wall-clock (concurrent=true)</span>
+                  <span className="text-fg-accent">to_dict()</span>
+                  <span className="text-fg-text-muted ml-1">— Wall-clock (concurrent=true)</span>
                 </button>
                 <button
                   onClick={() => loadSample('scaled')}
-                  className="w-full text-left px-3 py-1.5 text-[11px] text-[#E6EDF3] hover:bg-[#21262D] transition-colors"
+                  className="w-full text-left px-3 py-1.5 text-[11px] text-fg-text hover:bg-fg-active transition-colors"
                 >
-                  <span className="text-[#FFB020]">to_scaled_dict()</span>
-                  <span className="text-[#6E7681] ml-1">— Scaled (_wall_clock)</span>
+                  <span className="text-fg-amber">to_scaled_dict()</span>
+                  <span className="text-fg-text-muted ml-1">— Scaled (_wall_clock)</span>
                 </button>
               </div>
             )}
@@ -180,8 +180,8 @@ export default function JsonInput({
       </div>
 
       {/* Hz Configuration */}
-      <div className="flex items-center gap-3 px-3 py-2 border-b border-[#21262D] bg-[#0D1117]/80">
-        <label className="text-[11px] text-[#8B949E] whitespace-nowrap">
+      <div className="flex items-center gap-3 px-3 py-2 border-b border-fg-border bg-fg-bg/80">
+        <label className="text-[11px] text-fg-text-secondary whitespace-nowrap">
           Sample Rate
         </label>
         <div className="flex items-center gap-1.5">
@@ -189,11 +189,11 @@ export default function JsonInput({
             type="number"
             value={hz}
             onChange={(e) => onHzChange(Math.max(1, parseInt(e.target.value) || 100))}
-            className="w-20 px-2 py-1 rounded bg-[#161B22] border border-[#21262D] text-[#E6EDF3] font-mono text-[11px] focus:border-[#00D4FF] focus:outline-none transition-colors"
+            className="w-20 px-2 py-1 rounded bg-fg-panel border border-fg-border text-fg-text font-mono text-[11px] focus:border-fg-accent focus:outline-none transition-colors"
           />
-          <span className="text-[11px] text-[#8B949E]">Hz</span>
+          <span className="text-[11px] text-fg-text-secondary">Hz</span>
         </div>
-        <span className="text-[10px] text-[#6E7681]">
+        <span className="text-[10px] text-fg-text-muted">
           (1 sample = {(1000 / hz).toFixed(2)}ms)
         </span>
       </div>
@@ -202,12 +202,12 @@ export default function JsonInput({
       <div className="flex-1 relative overflow-hidden">
         <div className="absolute inset-0 flex overflow-auto">
           {/* Line numbers */}
-          <div className="flex-shrink-0 w-10 bg-[#0D1117] border-r border-[#21262D] select-none overflow-hidden">
+          <div className="flex-shrink-0 w-10 bg-fg-bg border-r border-fg-border select-none overflow-hidden">
             <div className="py-2 px-1">
               {Array.from({ length: Math.max(lineCount, 20) }, (_, i) => (
                 <div
                   key={i}
-                  className="text-[11px] font-mono text-[#6E7681] text-right pr-1 leading-[1.6]"
+                  className="text-[11px] font-mono text-fg-text-muted text-right pr-1 leading-[1.6]"
                 >
                   {i + 1}
                 </div>
@@ -221,7 +221,7 @@ export default function JsonInput({
             value={value}
             onChange={(e) => onChange(e.target.value)}
             onPaste={handlePaste}
-            className="json-input flex-1 bg-transparent text-[#E6EDF3] p-2 focus:outline-none w-full"
+            className="json-input flex-1 bg-transparent text-fg-text p-2 focus:outline-none w-full"
             placeholder={`Paste your telemetry JSON here...
 
 Supported formats:
@@ -242,7 +242,7 @@ Tip: Use "concurrent": true or "async": true
       </div>
 
       {/* Status bar */}
-      <div className="flex items-center justify-between px-3 py-1.5 border-t border-[#21262D] bg-[#0D1117]">
+      <div className="flex items-center justify-between px-3 py-1.5 border-t border-fg-border bg-fg-bg">
         <div className="flex items-center gap-2">
           {error ? (
             <>
@@ -255,19 +255,19 @@ Tip: Use "concurrent": true or "async": true
               <span className="text-[10px] text-green-400">Valid JSON</span>
             </>
           ) : (
-            <span className="text-[10px] text-[#6E7681]">Waiting for input...</span>
+            <span className="text-[10px] text-fg-text-muted">Waiting for input...</span>
           )}
         </div>
         <div className="flex items-center gap-3">
           {value && (
             <button
               onClick={formatJson}
-              className="text-[10px] text-[#8B949E] hover:text-[#00D4FF] transition-colors"
+              className="text-[10px] text-fg-text-secondary hover:text-fg-accent transition-colors"
             >
               Format
             </button>
           )}
-          <span className="text-[10px] text-[#6E7681]">
+          <span className="text-[10px] text-fg-text-muted">
             {lineCount} lines
           </span>
         </div>

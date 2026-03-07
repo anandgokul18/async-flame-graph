@@ -1,6 +1,6 @@
 /**
  * Toolbar — Flame graph control bar
- * Design: Observatory dark console
+ * Design: Observatory console — supports light/dark mode via CSS variables
  * Features: search, view mode toggle, render mode toggle, color mode, zoom controls, area-zoom, reset
  */
 
@@ -80,21 +80,21 @@ export default function Toolbar({
   const isZoomed = zoomLevel > 1.01;
 
   return (
-    <div className="flex items-center gap-2 px-3 py-2 bg-[#0D1117] border-b border-[#21262D]">
+    <div className="flex items-center gap-2 px-3 py-2 bg-fg-bg border-b border-fg-border">
       {/* Search */}
       <div className="relative flex-1 max-w-xs">
-        <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#6E7681]" />
+        <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-text-muted" />
         <input
           type="text"
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}
           placeholder="Search functions..."
-          className="w-full pl-8 pr-8 py-1.5 rounded bg-[#161B22] border border-[#21262D] text-[#E6EDF3] font-mono text-[11px] placeholder-[#6E7681] focus:border-[#00D4FF] focus:outline-none transition-colors"
+          className="w-full pl-8 pr-8 py-1.5 rounded bg-fg-panel border border-fg-border text-fg-text font-mono text-[11px] placeholder:text-fg-text-muted focus:border-fg-accent focus:outline-none transition-colors"
         />
         {searchQuery && (
           <button
             onClick={() => onSearchChange('')}
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-[#6E7681] hover:text-[#E6EDF3]"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-fg-text-muted hover:text-fg-text"
           >
             <X size={12} />
           </button>
@@ -102,16 +102,16 @@ export default function Toolbar({
       </div>
 
       {/* Divider */}
-      <div className="w-px h-5 bg-[#21262D]" />
+      <div className="w-px h-5 bg-fg-border" />
 
       {/* View mode toggle */}
-      <div className="flex items-center bg-[#161B22] rounded border border-[#21262D]">
+      <div className="flex items-center bg-fg-panel rounded border border-fg-border">
         <button
           onClick={() => onViewModeChange('table')}
           className={`p-1.5 rounded-l transition-colors ${
             viewMode === 'table'
-              ? 'bg-[#21262D] text-[#E6EDF3]'
-              : 'text-[#6E7681] hover:text-[#8B949E]'
+              ? 'bg-fg-active text-fg-text'
+              : 'text-fg-text-muted hover:text-fg-text-secondary'
           }`}
           title="Top Table"
         >
@@ -121,8 +121,8 @@ export default function Toolbar({
           onClick={() => onViewModeChange('flame')}
           className={`p-1.5 transition-colors ${
             viewMode === 'flame'
-              ? 'bg-[#21262D] text-[#E6EDF3]'
-              : 'text-[#6E7681] hover:text-[#8B949E]'
+              ? 'bg-fg-active text-fg-text'
+              : 'text-fg-text-muted hover:text-fg-text-secondary'
           }`}
           title="Flame Graph"
         >
@@ -132,8 +132,8 @@ export default function Toolbar({
           onClick={() => onViewModeChange('both')}
           className={`p-1.5 rounded-r transition-colors ${
             viewMode === 'both'
-              ? 'bg-[#21262D] text-[#E6EDF3]'
-              : 'text-[#6E7681] hover:text-[#8B949E]'
+              ? 'bg-fg-active text-fg-text'
+              : 'text-fg-text-muted hover:text-fg-text-secondary'
           }`}
           title="Both"
         >
@@ -142,16 +142,16 @@ export default function Toolbar({
       </div>
 
       {/* Divider */}
-      <div className="w-px h-5 bg-[#21262D]" />
+      <div className="w-px h-5 bg-fg-border" />
 
       {/* Render mode toggle: Wall-Clock vs Scaled */}
-      <div className="flex items-center bg-[#161B22] rounded border border-[#21262D]">
+      <div className="flex items-center bg-fg-panel rounded border border-fg-border">
         <button
           onClick={() => onRenderModeChange('wall-clock')}
           className={`flex items-center gap-1 px-2 py-1.5 rounded-l text-[11px] transition-colors ${
             renderMode === 'wall-clock'
-              ? 'bg-[#21262D] text-[#00D4FF]'
-              : 'text-[#6E7681] hover:text-[#8B949E]'
+              ? 'bg-fg-active text-fg-accent'
+              : 'text-fg-text-muted hover:text-fg-text-secondary'
           }`}
           title="Wall-Clock mode (to_dict): Shows true parallel durations. Children can overflow parent width."
         >
@@ -162,8 +162,8 @@ export default function Toolbar({
           onClick={() => onRenderModeChange('scaled')}
           className={`flex items-center gap-1 px-2 py-1.5 rounded-r text-[11px] transition-colors ${
             renderMode === 'scaled'
-              ? 'bg-[#21262D] text-[#FFB020]'
-              : 'text-[#6E7681] hover:text-[#8B949E]'
+              ? 'bg-fg-active text-fg-amber'
+              : 'text-fg-text-muted hover:text-fg-text-secondary'
           }`}
           title="Scaled mode (to_scaled_dict): Children proportionally fit within parent. Hover for wall-clock values."
         >
@@ -173,15 +173,15 @@ export default function Toolbar({
       </div>
 
       {/* Divider */}
-      <div className="w-px h-5 bg-[#21262D]" />
+      <div className="w-px h-5 bg-fg-border" />
 
       {/* Color mode */}
       <button
         onClick={() => onColorModeChange(colorMode === 'self-time' ? 'package' : 'self-time')}
         className={`flex items-center gap-1.5 px-2 py-1.5 rounded text-[11px] transition-colors ${
           colorMode === 'package'
-            ? 'bg-[#21262D] text-[#E6EDF3]'
-            : 'text-[#8B949E] hover:text-[#E6EDF3] hover:bg-[#161B22]'
+            ? 'bg-fg-active text-fg-text'
+            : 'text-fg-text-secondary hover:text-fg-text hover:bg-fg-panel'
         }`}
         title={`Color by: ${colorMode === 'self-time' ? 'Self Time' : 'Package'}`}
       >
@@ -194,23 +194,23 @@ export default function Toolbar({
       {/* Text align */}
       <button
         onClick={() => onTextAlignChange(textAlign === 'left' ? 'right' : 'left')}
-        className="p-1.5 rounded text-[#8B949E] hover:text-[#E6EDF3] hover:bg-[#161B22] transition-colors"
+        className="p-1.5 rounded text-fg-text-secondary hover:text-fg-text hover:bg-fg-panel transition-colors"
         title={`Text align: ${textAlign}`}
       >
         {textAlign === 'left' ? <AlignLeft size={13} /> : <AlignRight size={13} />}
       </button>
 
       {/* Divider */}
-      <div className="w-px h-5 bg-[#21262D]" />
+      <div className="w-px h-5 bg-fg-border" />
 
       {/* Zoom controls */}
-      <div className="flex items-center bg-[#161B22] rounded border border-[#21262D]">
+      <div className="flex items-center bg-fg-panel rounded border border-fg-border">
         <button
           onClick={onZoomOut}
           className={`p-1.5 rounded-l transition-colors ${
             isZoomed
-              ? 'text-[#E6EDF3] hover:bg-[#21262D]'
-              : 'text-[#484F58] cursor-not-allowed'
+              ? 'text-fg-text hover:bg-fg-active'
+              : 'text-fg-text-dimmed cursor-not-allowed'
           }`}
           title="Zoom out (÷2)"
           disabled={!isZoomed}
@@ -219,10 +219,10 @@ export default function Toolbar({
         </button>
         <button
           onClick={onResetZoom}
-          className={`px-2 py-1.5 text-[10px] font-mono transition-colors border-x border-[#21262D] min-w-[42px] text-center ${
+          className={`px-2 py-1.5 text-[10px] font-mono transition-colors border-x border-fg-border min-w-[42px] text-center ${
             isZoomed
-              ? 'text-[#00D4FF] hover:bg-[#21262D] font-bold'
-              : 'text-[#6E7681] hover:text-[#8B949E] hover:bg-[#21262D]'
+              ? 'text-fg-accent hover:bg-fg-active font-bold'
+              : 'text-fg-text-muted hover:text-fg-text-secondary hover:bg-fg-active'
           }`}
           title={isZoomed ? `Current zoom: ${formatZoom(zoomLevel)} — Click to reset` : 'Zoom level: 1x'}
         >
@@ -230,17 +230,17 @@ export default function Toolbar({
         </button>
         <button
           onClick={onZoomIn}
-          className="p-1.5 text-[#8B949E] hover:text-[#E6EDF3] hover:bg-[#21262D] transition-colors"
+          className="p-1.5 text-fg-text-secondary hover:text-fg-text hover:bg-fg-active transition-colors"
           title="Zoom in (×2)"
         >
           <ZoomIn size={14} />
         </button>
         <button
           onClick={onToggleAreaZoom}
-          className={`p-1.5 rounded-r transition-colors border-l border-[#21262D] ${
+          className={`p-1.5 rounded-r transition-colors border-l border-fg-border ${
             areaZoomActive
-              ? 'bg-[#00D4FF]/20 text-[#00D4FF] border-[#00D4FF]/30'
-              : 'text-[#8B949E] hover:text-[#E6EDF3] hover:bg-[#21262D]'
+              ? 'bg-fg-accent-bg text-fg-accent border-fg-accent-border'
+              : 'text-fg-text-secondary hover:text-fg-text hover:bg-fg-active'
           }`}
           title={areaZoomActive ? 'Area zoom active — drag on the flame graph to select a region' : 'Area zoom — drag to select a region to zoom into'}
         >
@@ -249,17 +249,17 @@ export default function Toolbar({
       </div>
 
       {/* Divider */}
-      <div className="w-px h-5 bg-[#21262D]" />
+      <div className="w-px h-5 bg-fg-border" />
 
       {/* Focus status / Reset */}
       {focusedSpanName ? (
-        <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-[#FFB020]/10 border border-[#FFB020]/20">
-          <span className="text-[10px] text-[#FFB020] truncate max-w-[120px]">
+        <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-fg-amber-bg border border-fg-amber-border">
+          <span className="text-[10px] text-fg-amber truncate max-w-[120px]">
             Focused: {focusedSpanName}
           </span>
           <button
             onClick={onResetFocus}
-            className="text-[#FFB020] hover:text-[#FFD166]"
+            className="text-fg-amber hover:opacity-80"
           >
             <X size={11} />
           </button>
@@ -267,7 +267,7 @@ export default function Toolbar({
       ) : (
         <button
           onClick={onResetFocus}
-          className="p-1.5 rounded text-[#8B949E] hover:text-[#E6EDF3] hover:bg-[#161B22] transition-colors"
+          className="p-1.5 rounded text-fg-text-secondary hover:text-fg-text hover:bg-fg-panel transition-colors"
           title="Reset view"
         >
           <RotateCcw size={13} />
@@ -275,9 +275,9 @@ export default function Toolbar({
       )}
 
       {/* Stats */}
-      <div className="ml-auto flex items-center gap-3 text-[10px] text-[#6E7681]">
+      <div className="ml-auto flex items-center gap-3 text-[10px] text-fg-text-muted">
         <span>{spanCount} spans</span>
-        <span className="font-mono text-[#8B949E]">
+        <span className="font-mono text-fg-text-secondary">
           {totalDuration > 0 ? `${totalDuration.toFixed(3)}s total` : ''}
         </span>
       </div>

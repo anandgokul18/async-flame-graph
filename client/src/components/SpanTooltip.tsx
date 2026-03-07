@@ -1,6 +1,6 @@
 /**
  * SpanTooltip — Frosted glass tooltip for span details
- * Design: Observatory dark console with glass-panel effect
+ * Design: Observatory console — supports light/dark mode via CSS variables
  * Shows both scaled and wall-clock values in Scaled mode
  */
 
@@ -59,24 +59,24 @@ export default function SpanTooltip({ span, x, y, totalDuration, renderMode }: S
       }}
     >
       {/* Name */}
-      <div className="font-mono text-xs font-semibold text-[#E6EDF3] mb-2 break-all leading-relaxed">
+      <div className="font-mono text-xs font-semibold text-fg-text mb-2 break-all leading-relaxed">
         {span.name}
       </div>
 
       {/* Scaled mode dual-value banner */}
       {isScaled && hasWallClock && (
-        <div className="mb-2 px-2.5 py-2 rounded-md bg-[#FFB020]/10 border border-[#FFB020]/20">
+        <div className="mb-2 px-2.5 py-2 rounded-md bg-fg-amber-bg border border-fg-amber-border">
           <div className="flex items-center gap-1.5 mb-1.5">
-            <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#FFB020]" />
-            <span className="text-[10px] text-[#FFB020] font-semibold uppercase tracking-wider">Scaled View</span>
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-fg-amber" />
+            <span className="text-[10px] text-fg-amber font-semibold uppercase tracking-wider">Scaled View</span>
           </div>
           <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-            <div className="text-[10px] text-[#8B949E]">Displayed</div>
-            <div className="text-[10px] font-mono text-[#00D4FF] font-medium text-right">
+            <div className="text-[10px] text-fg-text-secondary">Displayed</div>
+            <div className="text-[10px] font-mono text-fg-accent font-medium text-right">
               {formatDuration(span.duration)}
             </div>
-            <div className="text-[10px] text-[#8B949E]">Actual (wall-clock)</div>
-            <div className="text-[10px] font-mono text-[#FFB020] font-medium text-right">
+            <div className="text-[10px] text-fg-text-secondary">Actual (wall-clock)</div>
+            <div className="text-[10px] font-mono text-fg-amber font-medium text-right">
               {formatDuration(span.wallClockValue)}
             </div>
           </div>
@@ -86,11 +86,11 @@ export default function SpanTooltip({ span, x, y, totalDuration, renderMode }: S
       {/* Timing details */}
       <div className="space-y-1.5">
         <div className="flex justify-between gap-6 text-[11px]">
-          <span className="text-[#8B949E]">Duration</span>
-          <span className="font-mono text-[#00D4FF] font-medium">
+          <span className="text-fg-text-secondary">Duration</span>
+          <span className="font-mono text-fg-accent font-medium">
             {formatDuration(span.duration)}
             {isScaled && hasWallClock && (
-              <span className="text-[#8B949E] ml-1">(scaled)</span>
+              <span className="text-fg-text-secondary ml-1">(scaled)</span>
             )}
           </span>
         </div>
@@ -98,62 +98,62 @@ export default function SpanTooltip({ span, x, y, totalDuration, renderMode }: S
         {/* Show wall-clock if different from duration (scaled mode) */}
         {hasWallClock && (
           <div className="flex justify-between gap-6 text-[11px]">
-            <span className="text-[#8B949E]">Wall-Clock</span>
-            <span className="font-mono text-[#FFB020] font-medium">
+            <span className="text-fg-text-secondary">Wall-Clock</span>
+            <span className="font-mono text-fg-amber font-medium">
               {formatDuration(span.wallClockValue)}
               {isScaled && (
-                <span className="text-[#8B949E] ml-1">(actual)</span>
+                <span className="text-fg-text-secondary ml-1">(actual)</span>
               )}
             </span>
           </div>
         )}
 
         <div className="flex justify-between gap-6 text-[11px]">
-          <span className="text-[#8B949E]">Self Time</span>
-          <span className="font-mono text-[#FFB020] font-medium">
+          <span className="text-fg-text-secondary">Self Time</span>
+          <span className="font-mono text-fg-amber font-medium">
             {formatDuration(span.selfTime)}
           </span>
         </div>
 
         <div className="flex justify-between gap-6 text-[11px]">
-          <span className="text-[#8B949E]">% of Total</span>
-          <span className="font-mono text-[#E6EDF3]">
+          <span className="text-fg-text-secondary">% of Total</span>
+          <span className="font-mono text-fg-text">
             {percentage.toFixed(1)}%
           </span>
         </div>
 
         <div className="flex justify-between gap-6 text-[11px]">
-          <span className="text-[#8B949E]">Self %</span>
-          <span className="font-mono text-[#E6EDF3]">
+          <span className="text-fg-text-secondary">Self %</span>
+          <span className="font-mono text-fg-text">
             {selfPercentage.toFixed(1)}%
           </span>
         </div>
 
         <div className="flex justify-between gap-6 text-[11px]">
-          <span className="text-[#8B949E]">Start</span>
-          <span className="font-mono text-[#E6EDF3]">
+          <span className="text-fg-text-secondary">Start</span>
+          <span className="font-mono text-fg-text">
             {formatDuration(span.startTime)}
           </span>
         </div>
 
         <div className="flex justify-between gap-6 text-[11px]">
-          <span className="text-[#8B949E]">End</span>
-          <span className="font-mono text-[#E6EDF3]">
+          <span className="text-fg-text-secondary">End</span>
+          <span className="font-mono text-fg-text">
             {formatDuration(span.endTime)}
           </span>
         </div>
 
         <div className="flex justify-between gap-6 text-[11px]">
-          <span className="text-[#8B949E]">Depth</span>
-          <span className="font-mono text-[#E6EDF3]">
+          <span className="text-fg-text-secondary">Depth</span>
+          <span className="font-mono text-fg-text">
             {span.depth}
           </span>
         </div>
 
         {span.children.length > 0 && (
           <div className="flex justify-between gap-6 text-[11px]">
-            <span className="text-[#8B949E]">Children</span>
-            <span className="font-mono text-[#E6EDF3]">
+            <span className="text-fg-text-secondary">Children</span>
+            <span className="font-mono text-fg-text">
               {span.children.length}
             </span>
           </div>
@@ -161,10 +161,10 @@ export default function SpanTooltip({ span, x, y, totalDuration, renderMode }: S
 
         {/* Concurrency / Async / Blocking indicators */}
         {(span.isAsync || span.isParallel || span.isConcurrent) && (
-          <div className="mt-1.5 pt-1.5 border-t border-[#21262D]">
+          <div className="mt-1.5 pt-1.5 border-t border-fg-border">
             <div className="flex items-center gap-1.5 text-[11px]">
-              <span className="inline-block w-2 h-2 rounded-full bg-[#00D4FF]" />
-              <span className="text-[#00D4FF] font-medium">
+              <span className="inline-block w-2 h-2 rounded-full bg-fg-accent" />
+              <span className="text-fg-accent font-medium">
                 {span.isConcurrent ? 'Concurrent' : span.isAsync ? 'Async' : 'Parallel'} Execution
               </span>
             </div>
@@ -173,27 +173,27 @@ export default function SpanTooltip({ span, x, y, totalDuration, renderMode }: S
 
         {span.isBlocking && (
           <div className="flex items-center gap-1.5 text-[11px] mt-1">
-            <span className="inline-block w-2 h-2 rounded-full bg-[#FF6B35]" />
-            <span className="text-[#FF6B35] font-medium">Blocking (awaited)</span>
+            <span className="inline-block w-2 h-2 rounded-full bg-orange-500" />
+            <span className="text-orange-500 font-medium">Blocking (awaited)</span>
           </div>
         )}
 
         {!span.isBlocking && (span.isAsync || span.isConcurrent) && span.children.length === 0 && (
           <div className="flex items-center gap-1.5 text-[11px] mt-1">
-            <span className="inline-block w-2 h-2 rounded-full bg-[#8B949E]" />
-            <span className="text-[#8B949E] font-medium">Fire-and-forget</span>
+            <span className="inline-block w-2 h-2 rounded-full bg-fg-text-secondary" />
+            <span className="text-fg-text-secondary font-medium">Fire-and-forget</span>
           </div>
         )}
       </div>
 
       {/* Attributes */}
       {span.attributes && Object.keys(span.attributes).length > 0 && (
-        <div className="mt-2 pt-2 border-t border-[#21262D]">
-          <div className="text-[10px] text-[#8B949E] mb-1">Attributes</div>
+        <div className="mt-2 pt-2 border-t border-fg-border">
+          <div className="text-[10px] text-fg-text-secondary mb-1">Attributes</div>
           {Object.entries(span.attributes).slice(0, 5).map(([key, val]) => (
             <div key={key} className="flex justify-between gap-4 text-[10px]">
-              <span className="text-[#6E7681] truncate">{key}</span>
-              <span className="font-mono text-[#E6EDF3] truncate">{String(val)}</span>
+              <span className="text-fg-text-muted truncate">{key}</span>
+              <span className="font-mono text-fg-text truncate">{String(val)}</span>
             </div>
           ))}
         </div>

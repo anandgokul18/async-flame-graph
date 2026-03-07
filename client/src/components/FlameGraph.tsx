@@ -23,6 +23,7 @@
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, forwardRef } from "react";
 import type { FlameData, ProcessedSpan } from "@/lib/flameEngine";
 import { formatDuration } from "@/lib/flameEngine";
+import type { ThemeColors } from "@/lib/themeColors";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -32,11 +33,11 @@ const MIN_BAR_WIDTH = 2;
 const FONT_SIZE = 11;
 const TIMELINE_HEIGHT = 36;
 const PADDING_TOP = 10;
-const SCROLLBAR_HEIGHT = 14;
-const SCROLLBAR_TRACK_COLOR = 'rgba(33, 38, 45, 0.8)';
-const SCROLLBAR_THUMB_COLOR = 'rgba(0, 212, 255, 0.35)';
-const SCROLLBAR_THUMB_HOVER_COLOR = 'rgba(0, 212, 255, 0.55)';
-const SCROLLBAR_THUMB_ACTIVE_COLOR = 'rgba(0, 212, 255, 0.7)';
+const SCROLLBAR_HEIGHT = 18;
+const SCROLLBAR_TRACK_COLOR = 'rgba(22, 27, 34, 0.95)';
+const SCROLLBAR_THUMB_COLOR = 'rgba(0, 212, 255, 0.5)';
+const SCROLLBAR_THUMB_HOVER_COLOR = 'rgba(0, 212, 255, 0.7)';
+const SCROLLBAR_THUMB_ACTIVE_COLOR = 'rgba(0, 212, 255, 0.85)';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -51,6 +52,7 @@ interface FlameGraphProps {
   onCycleParallelPage?: (groupId: string) => void;
   areaZoomActive?: boolean;
   onAreaZoomComplete?: () => void;
+  themeColors?: ThemeColors;
 }
 
 export interface FlameGraphHandle {
@@ -141,14 +143,15 @@ function drawTimeline(
   totalDuration: number,
   viewState: ViewState,
   focusedSpan?: ProcessedSpan | null,
+  tc?: ThemeColors | null,
 ) {
   const focusStart = focusedSpan ? focusedSpan.startTime : 0;
   const focusDuration = focusedSpan ? focusedSpan.duration : totalDuration;
 
-  ctx.fillStyle = '#0D1117';
+  ctx.fillStyle = tc?.canvasBg ?? '#0D1117';
   ctx.fillRect(0, 0, width, TIMELINE_HEIGHT);
 
-  ctx.strokeStyle = '#21262D';
+  ctx.strokeStyle = tc?.border ?? '#21262D';
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(0, TIMELINE_HEIGHT - 0.5);
@@ -182,13 +185,13 @@ function drawTimeline(
 
     if (pixelX < -20 || pixelX > width + 20) continue;
 
-    ctx.strokeStyle = '#30363D';
+    ctx.strokeStyle = tc?.canvasGridLine ?? '#30363D';
     ctx.beginPath();
     ctx.moveTo(pixelX, TIMELINE_HEIGHT - 8);
     ctx.lineTo(pixelX, TIMELINE_HEIGHT - 1);
     ctx.stroke();
 
-    ctx.fillStyle = '#8B949E';
+    ctx.fillStyle = tc?.canvasTimelineText ?? '#8B949E';
     ctx.fillText(formatDuration(t), pixelX, TIMELINE_HEIGHT - 10);
   }
 }
@@ -201,6 +204,7 @@ function drawPaperStackLayers(
   pixelY: number,
   pixelW: number,
   totalCount: number,
+  isDark = true,
 ) {
   const stackLayers = Math.min(totalCount - 1, 3);
   
@@ -208,8 +212,13 @@ function drawPaperStackLayers(
     const offsetX = i * 3;
     const offsetY = -i * 2;
     
-    ctx.fillStyle = `rgba(33, 38, 45, ${0.6 + i * 0.1})`;
-    ctx.strokeStyle = 'rgba(48, 54, 61, 0.6)';
+    if (isDark) {
+      ctx.fillStyle = `rgba(33, 38, 45, ${0.6 + i * 0.1})`;
+      ctx.strokeStyle = 'rgba(48, 54, 61, 0.6)';
+    } else {
+      ctx.fillStyle = `rgba(200, 210, 220, ${0.5 + i * 0.1})`;
+      ctx.strokeStyle = 'rgba(180, 190, 200, 0.6)';
+    }
     ctx.lineWidth = 1;
     
     ctx.beginPath();
@@ -234,17 +243,18 @@ function drawScrollbar(
   viewState: ViewState,
   isHovered: boolean,
   isActive: boolean,
+  tc?: ThemeColors | null,
 ) {
   if (viewState.zoom <= 1) return; // No scrollbar needed at 1x
 
   const y = canvasHeight - SCROLLBAR_HEIGHT;
 
   // Track
-  ctx.fillStyle = SCROLLBAR_TRACK_COLOR;
+  ctx.fillStyle = tc?.scrollbarTrack ?? SCROLLBAR_TRACK_COLOR;
   ctx.fillRect(0, y, width, SCROLLBAR_HEIGHT);
 
   // Top border
-  ctx.strokeStyle = '#30363D';
+  ctx.strokeStyle = tc?.canvasGridLine ?? '#30363D';
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(0, y + 0.5);
@@ -257,20 +267,36 @@ function drawScrollbar(
   const thumbPad = 2;
 
   ctx.fillStyle = isActive
-    ? SCROLLBAR_THUMB_ACTIVE_COLOR
+    ? (tc?.scrollbarThumbActive ?? SCROLLBAR_THUMB_ACTIVE_COLOR)
     : isHovered
-      ? SCROLLBAR_THUMB_HOVER_COLOR
-      : SCROLLBAR_THUMB_COLOR;
+      ? (tc?.scrollbarThumbHover ?? SCROLLBAR_THUMB_HOVER_COLOR)
+      : (tc?.scrollbarThumb ?? SCROLLBAR_THUMB_COLOR);
+
+  const clampedThumbX = Math.max(0, Math.min(thumbX, width - thumbWidth));
+  const thumbH = SCROLLBAR_HEIGHT - thumbPad * 2;
 
   ctx.beginPath();
-  ctx.roundRect(
-    Math.max(0, Math.min(thumbX, width - thumbWidth)),
-    y + thumbPad,
-    thumbWidth,
-    SCROLLBAR_HEIGHT - thumbPad * 2,
-    4
-  );
+  ctx.roundRect(clampedThumbX, y + thumbPad, thumbWidth, thumbH, 5);
   ctx.fill();
+
+  // Thumb border for visibility
+  ctx.strokeStyle = tc?.scrollbarThumbBorder ?? 'rgba(0, 212, 255, 0.3)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Grip lines in the center of the thumb
+  const gripCenterX = clampedThumbX + thumbWidth / 2;
+  const gripY = y + thumbPad + thumbH / 2;
+  ctx.strokeStyle = isActive || isHovered
+    ? (tc?.scrollbarGripHover ?? 'rgba(13, 17, 23, 0.6)')
+    : (tc?.scrollbarGrip ?? 'rgba(13, 17, 23, 0.4)');
+  ctx.lineWidth = 1;
+  for (let i = -2; i <= 2; i++) {
+    ctx.beginPath();
+    ctx.moveTo(gripCenterX + i * 4, gripY - 3);
+    ctx.lineTo(gripCenterX + i * 4, gripY + 3);
+    ctx.stroke();
+  }
 }
 
 function getScrollbarThumbRect(
@@ -314,6 +340,7 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
   onCycleParallelPage,
   areaZoomActive,
   onAreaZoomComplete,
+  themeColors,
 }, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -406,11 +433,11 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
 
     // Clear
     ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = '#0D1117';
+    ctx.fillStyle = themeColors?.canvasBg ?? '#0D1117';
     ctx.fillRect(0, 0, w, h);
 
     // Timeline
-    drawTimeline(ctx, w, data.totalDuration, viewState, focusedSpan);
+    drawTimeline(ctx, w, data.totalDuration, viewState, focusedSpan, themeColors);
 
     const focusX = focusedSpan ? focusedSpan.x : 0;
     const focusW = focusedSpan ? focusedSpan.width : 1;
@@ -432,9 +459,10 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
       const isParallelParent = span.isConcurrent && span.children.length > 1 &&
         span.children.some(c => c.parallelGroupId === span.id);
 
+      const isDark = !themeColors || themeColors.canvasBg === '#0D1117';
       // Draw paper-stack background layers on the PARENT bar
       if (isParallelParent && pixelW > 30) {
-        drawPaperStackLayers(ctx, pixelX, pixelY, pixelW, span.children.length);
+        drawPaperStackLayers(ctx, pixelX, pixelY, pixelW, span.children.length, isDark);
       }
 
       // Also draw paper-stack layers on child if it's wide enough
@@ -445,7 +473,7 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
         span.parallelIndex !== undefined &&
         pixelW > 60
       ) {
-        drawPaperStackLayers(ctx, pixelX, pixelY, pixelW, span.parallelSiblingCount);
+        drawPaperStackLayers(ctx, pixelX, pixelY, pixelW, span.parallelSiblingCount, isDark);
       }
 
       // Bar color
@@ -467,16 +495,16 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
 
       // Border
       ctx.strokeStyle = isHovered
-        ? 'rgba(0, 212, 255, 0.8)'
+        ? (themeColors?.hoverBorder ?? 'rgba(0, 212, 255, 0.8)')
         : isSearchMatch
-          ? 'rgba(255, 215, 0, 0.8)'
-          : 'rgba(0, 0, 0, 0.3)';
+          ? (themeColors?.searchMatchBorder ?? 'rgba(255, 215, 0, 0.8)')
+          : (themeColors?.canvasBarBorder ?? 'rgba(0, 0, 0, 0.3)');
       ctx.lineWidth = isHovered || isSearchMatch ? 2 : 1;
       ctx.stroke();
 
-      // Async indicator (cyan bottom bar on concurrent parents)
+      // Async indicator (accent bottom bar on concurrent parents)
       if (span.isConcurrent) {
-        ctx.fillStyle = 'rgba(0, 212, 255, 0.7)';
+        ctx.fillStyle = themeColors?.canvasAsyncBar ?? 'rgba(0, 212, 255, 0.7)';
         ctx.fillRect(pixelX, pixelY + ROW_HEIGHT - 3, pixelW, 3);
       }
 
@@ -503,7 +531,7 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
 
       // Text label
       if (pixelW > 20) {
-        ctx.fillStyle = '#E6EDF3';
+        ctx.fillStyle = themeColors?.canvasBarText ?? '#E6EDF3';
         ctx.font = `${FONT_SIZE}px 'JetBrains Mono', monospace`;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
@@ -535,7 +563,7 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
     }
 
     // Draw custom scrollbar
-    drawScrollbar(ctx, w, cssHeight, viewState, isScrollbarHovered.current, isScrollbarDragging.current);
+    drawScrollbar(ctx, w, cssHeight, viewState, isScrollbarHovered.current, isScrollbarDragging.current, themeColors);
 
     // Draw area-zoom selection rectangle
     if (areaZoomRect) {
@@ -545,7 +573,7 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
       const rh = Math.abs(areaZoomRect.endY - areaZoomRect.startY);
 
       // Semi-transparent overlay outside selection
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+      ctx.fillStyle = themeColors?.selectionOverlay ?? 'rgba(0, 0, 0, 0.4)';
       // Top
       ctx.fillRect(0, 0, w, y);
       // Bottom
@@ -556,20 +584,20 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
       ctx.fillRect(x + rw, y, w - x - rw, rh);
 
       // Selection border
-      ctx.strokeStyle = 'rgba(0, 212, 255, 0.9)';
+      ctx.strokeStyle = themeColors?.selectionBorder ?? 'rgba(0, 212, 255, 0.9)';
       ctx.lineWidth = 2;
       ctx.setLineDash([6, 3]);
       ctx.strokeRect(x, y, rw, rh);
       ctx.setLineDash([]);
 
       // Selection fill
-      ctx.fillStyle = 'rgba(0, 212, 255, 0.08)';
+      ctx.fillStyle = themeColors?.selectionFill ?? 'rgba(0, 212, 255, 0.08)';
       ctx.fillRect(x, y, rw, rh);
 
       // Label
       if (rw > 60) {
         ctx.font = `bold 11px 'JetBrains Mono', monospace`;
-        ctx.fillStyle = 'rgba(0, 212, 255, 0.9)';
+        ctx.fillStyle = themeColors?.selectionText ?? 'rgba(0, 212, 255, 0.9)';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'bottom';
         ctx.fillText('Release to zoom', x + rw / 2, y - 4);
@@ -578,7 +606,7 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
 
     setBadges(newBadges);
   }, [canvasSize.width, cssHeight, dpr, data, viewState, focusedSpan, visibleSpans,
-    hoveredSpan, searchQuery, searchMatches, activeParallelPages, areaZoomRect]);
+    hoveredSpan, searchQuery, searchMatches, activeParallelPages, areaZoomRect, themeColors]);
 
   // Render on state change
   useEffect(() => {
@@ -660,7 +688,7 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
 
     // Check if hovering over scrollbar
     const thumbRect = getScrollbarThumbRect(canvasSize.width, cssHeight, viewState);
-    if (thumbRect && mouseY >= thumbRect.y - 2 && mouseY <= thumbRect.y + thumbRect.h + 2) {
+    if (thumbRect && mouseY >= thumbRect.y - 6 && mouseY <= thumbRect.y + thumbRect.h + 4) {
       isScrollbarHovered.current = true;
       canvas.style.cursor = 'pointer';
       // Trigger re-render for hover effect
@@ -710,15 +738,24 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
 
     // Check scrollbar click
     const thumbRect = getScrollbarThumbRect(canvasSize.width, cssHeight, viewState);
-    if (thumbRect && mouseY >= thumbRect.y - 2 && mouseY <= thumbRect.y + thumbRect.h + 2) {
+    if (thumbRect && mouseY >= thumbRect.y - 6 && mouseY <= thumbRect.y + thumbRect.h + 4) {
       if (mouseX >= thumbRect.x && mouseX <= thumbRect.x + thumbRect.w) {
         // Clicked on thumb — start dragging
         isScrollbarDragging.current = true;
         scrollbarDragStart.current = { mouseX, offsetX: viewState.offsetX };
       } else {
-        // Clicked on track — jump to position
-        const trackFraction = mouseX / canvasSize.width;
-        const newOffsetX = clampOffset(-trackFraction * viewState.zoom + 0.5, viewState.zoom);
+        // Clicked on track — jump so the viewport centers on the clicked position
+        // trackFraction maps to a normalized data position
+        const clickedNorm = mouseX / canvasSize.width;
+        // We want this normalized position to be the center of the viewport
+        // The viewport center in normalized space is: (-offsetX + 0.5) / zoom
+        // So: (-newOffsetX + 0.5) / zoom = clickedNorm
+        // newOffsetX = 0.5 - clickedNorm * zoom
+        // But actually, clickedNorm is a track position, not a data position.
+        // The track maps [0..1] to the full data range [0..1].
+        // So we want the viewport to start at (clickedNorm - 0.5/zoom):
+        // newOffsetX = -(clickedNorm - 0.5/zoom) * zoom = -clickedNorm * zoom + 0.5
+        const newOffsetX = clampOffset(-clickedNorm * viewState.zoom + 0.5, viewState.zoom);
         setViewState(prev => ({ ...prev, offsetX: newOffsetX }));
       }
       return;
@@ -768,28 +805,31 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
       const focusX = focusedSpan ? focusedSpan.x : 0;
       const focusW = focusedSpan ? focusedSpan.width : 1;
 
+      // Convert pixel selection edges to normalized data coordinates
+      const selLeftNorm = (x1 / canvasSize.width - viewState.offsetX) / viewState.zoom;
+      const selRightNorm = (x2 / canvasSize.width - viewState.offsetX) / viewState.zoom;
+      const selRegionW = selRightNorm - selLeftNorm;
+
       if (smallest) {
         // Calculate zoom so that the smallest span covers at least 15% of screen
         const normalizedW = focusW > 0 ? smallest.width / focusW : smallest.width;
-        const currentPixelW = normalizedW * viewState.zoom * canvasSize.width;
-        const targetPixelW = canvasSize.width * 0.15; // 15% of screen
-        const zoomMultiplier = targetPixelW / currentPixelW;
-        const newZoom = Math.min(500, viewState.zoom * zoomMultiplier);
+        const targetFraction = 0.15; // 15% of screen
+        const newZoom = Math.min(500, targetFraction / normalizedW);
 
-        // Center on the selection center
-        const selCenterPixel = (x1 + x2) / 2;
-        const selCenterNorm = (selCenterPixel / canvasSize.width - viewState.offsetX) / viewState.zoom;
-        const newOffsetX = clampOffset(0.5 - selCenterNorm * newZoom, newZoom);
+        // Center the selection region in the viewport
+        const selCenterNorm = (selLeftNorm + selRightNorm) / 2;
+        // We want selCenterNorm to appear at viewport center (pixel 0.5)
+        // pixelX = (normalizedX * newZoom + newOffsetX) * canvasWidth
+        // 0.5 * canvasWidth = (selCenterNorm * newZoom + newOffsetX) * canvasWidth
+        // newOffsetX = 0.5 - selCenterNorm * newZoom
+        const newOffsetX = clampOffset(-selCenterNorm * newZoom + 0.5, newZoom);
 
         setViewState({ zoom: newZoom, offsetX: newOffsetX });
       } else {
         // No spans in selection — just zoom to the selected horizontal region
-        const leftNorm = (x1 / canvasSize.width - viewState.offsetX) / viewState.zoom;
-        const rightNorm = (x2 / canvasSize.width - viewState.offsetX) / viewState.zoom;
-        const regionW = rightNorm - leftNorm;
-        const newZoom = Math.min(500, 1 / regionW);
-        const centerNorm = (leftNorm + rightNorm) / 2;
-        const newOffsetX = clampOffset(0.5 - centerNorm * newZoom, newZoom);
+        const newZoom = Math.min(500, 1 / selRegionW);
+        const selCenterNorm = (selLeftNorm + selRightNorm) / 2;
+        const newOffsetX = clampOffset(-selCenterNorm * newZoom + 0.5, newZoom);
 
         setViewState({ zoom: newZoom, offsetX: newOffsetX });
       }
@@ -839,9 +879,11 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
   const zoomIn = useCallback(() => {
     setViewState(prev => {
       const newZoom = Math.min(500, prev.zoom * 2);
-      // Zoom centered on the current viewport center
-      const viewportCenterNorm = (-prev.offsetX + 0.5) / prev.zoom;
-      const newOffsetX = clampOffset(0.5 - viewportCenterNorm * newZoom, newZoom);
+      // Anchor zoom at the left edge of the current viewport
+      // The left edge in normalized space is: -offsetX / zoom
+      // After zoom, we want the same left edge: -newOffsetX / newZoom = -offsetX / zoom
+      // So: newOffsetX = offsetX * (newZoom / zoom)
+      const newOffsetX = clampOffset(prev.offsetX * (newZoom / prev.zoom), newZoom);
       return { zoom: newZoom, offsetX: newOffsetX };
     });
   }, [clampOffset]);
@@ -849,8 +891,8 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
   const zoomOut = useCallback(() => {
     setViewState(prev => {
       const newZoom = Math.max(1, prev.zoom / 2);
-      const viewportCenterNorm = (-prev.offsetX + 0.5) / prev.zoom;
-      const newOffsetX = clampOffset(0.5 - viewportCenterNorm * newZoom, newZoom);
+      // Anchor zoom at the left edge of the current viewport
+      const newOffsetX = clampOffset(prev.offsetX * (newZoom / prev.zoom), newZoom);
       return { zoom: newZoom, offsetX: newOffsetX };
     });
   }, [clampOffset]);
@@ -906,24 +948,22 @@ const FlameGraph = forwardRef<FlameGraphHandle, FlameGraphProps>(function FlameG
             minWidth: 32,
             padding: '0 6px',
             borderRadius: 9,
-            background: 'rgba(0, 212, 255, 0.9)',
-            color: '#0D1117',
+            background: themeColors?.badgeBg ?? 'rgba(0, 212, 255, 0.9)',
+            color: themeColors?.badgeText ?? '#0D1117',
             fontSize: 10,
             fontWeight: 700,
             fontFamily: "'JetBrains Mono', monospace",
             cursor: 'pointer',
             zIndex: 10,
-            border: '1px solid rgba(0, 212, 255, 0.4)',
+            border: `1px solid ${themeColors?.badgeBorder ?? 'rgba(0, 212, 255, 0.4)'}`,
             transition: 'transform 0.1s ease, background 0.1s ease',
             lineHeight: 1,
           }}
           onMouseEnter={(e) => {
             (e.currentTarget as HTMLElement).style.transform = 'scale(1.15)';
-            (e.currentTarget as HTMLElement).style.background = 'rgba(0, 212, 255, 1)';
           }}
           onMouseLeave={(e) => {
             (e.currentTarget as HTMLElement).style.transform = 'scale(1)';
-            (e.currentTarget as HTMLElement).style.background = 'rgba(0, 212, 255, 0.9)';
           }}
           title={`Click to cycle through ${badge.totalCount} parallel tasks (${badge.activeIndex + 1}/${badge.totalCount})\nActive: ${badge.activeChildName}`}
         >

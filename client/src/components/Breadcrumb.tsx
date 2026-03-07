@@ -1,6 +1,6 @@
 /**
  * Breadcrumb — Navigation trail for focused span hierarchy
- * Design: Observatory dark console with glass-panel styling
+ * Design: Observatory console — supports light/dark mode via CSS variables
  * Shows the path from root to the currently focused span
  */
 
@@ -16,11 +16,11 @@ export default function Breadcrumb({ path, onNavigate }: BreadcrumbProps) {
   if (path.length === 0) return null;
 
   return (
-    <div className="flex items-center gap-0.5 px-3 py-1.5 bg-[#161B22] border-b border-[#21262D] overflow-x-auto flex-shrink-0">
+    <div className="flex items-center gap-0.5 px-3 py-1.5 bg-fg-panel border-b border-fg-border overflow-x-auto flex-shrink-0">
       {/* Root button */}
       <button
         onClick={() => onNavigate(null)}
-        className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono text-[#8B949E] hover:text-[#E6EDF3] hover:bg-[#21262D] transition-colors flex-shrink-0"
+        className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono text-fg-text-secondary hover:text-fg-text hover:bg-fg-active transition-colors flex-shrink-0"
         title="Go to root"
       >
         <Home size={10} />
@@ -37,13 +37,13 @@ export default function Breadcrumb({ path, onNavigate }: BreadcrumbProps) {
 
         return (
           <div key={span.id} className="flex items-center gap-0.5 flex-shrink-0">
-            <ChevronRight size={10} className="text-[#30363D]" />
+            <ChevronRight size={10} className="text-fg-text-dimmed" />
             <button
               onClick={() => isLast ? undefined : onNavigate(span)}
               className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition-colors truncate max-w-[200px] ${
                 isLast
-                  ? 'text-[#FFB020] bg-[#FFB020]/10 border border-[#FFB020]/20 cursor-default'
-                  : 'text-[#8B949E] hover:text-[#E6EDF3] hover:bg-[#21262D] cursor-pointer'
+                  ? 'text-fg-amber bg-fg-amber-bg border border-fg-amber-border cursor-default'
+                  : 'text-fg-text-secondary hover:text-fg-text hover:bg-fg-active cursor-pointer'
               }`}
               title={span.name}
             >

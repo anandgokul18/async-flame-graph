@@ -1,6 +1,6 @@
 /**
  * SpanTable — Aggregated top-table view of all spans
- * Design: Observatory dark console
+ * Design: Observatory console — supports light/dark mode via CSS variables
  * Shows symbols sorted by self time with search/focus integration
  */
 
@@ -102,35 +102,35 @@ export default function SpanTable({
 
   const SortIndicator = ({ column }: { column: SortKey }) => {
     if (sortKey !== column) return null;
-    return <span className="ml-1 text-[#00D4FF]">{sortDir === 'desc' ? '↓' : '↑'}</span>;
+    return <span className="ml-1 text-fg-accent">{sortDir === 'desc' ? '↓' : '↑'}</span>;
   };
 
   return (
     <div className="w-full h-full overflow-auto">
       <table className="w-full text-[11px] font-mono">
         <thead className="sticky top-0 z-10">
-          <tr className="bg-[#161B22] border-b border-[#21262D]">
+          <tr className="bg-fg-panel border-b border-fg-border">
             <th className="w-8 px-2 py-2" />
             <th
-              className="text-left px-3 py-2 text-[#8B949E] font-medium cursor-pointer hover:text-[#E6EDF3] select-none"
+              className="text-left px-3 py-2 text-fg-text-secondary font-medium cursor-pointer hover:text-fg-text select-none"
               onClick={() => handleSort('name')}
             >
               Symbol <SortIndicator column="name" />
             </th>
             <th
-              className="text-right px-3 py-2 text-[#8B949E] font-medium cursor-pointer hover:text-[#E6EDF3] w-24 select-none"
+              className="text-right px-3 py-2 text-fg-text-secondary font-medium cursor-pointer hover:text-fg-text w-24 select-none"
               onClick={() => handleSort('self')}
             >
               Self <SortIndicator column="self" />
             </th>
             <th
-              className="text-right px-3 py-2 text-[#8B949E] font-medium cursor-pointer hover:text-[#E6EDF3] w-24 select-none"
+              className="text-right px-3 py-2 text-fg-text-secondary font-medium cursor-pointer hover:text-fg-text w-24 select-none"
               onClick={() => handleSort('total')}
             >
               Total <SortIndicator column="total" />
             </th>
             <th
-              className="text-right px-3 py-2 text-[#8B949E] font-medium cursor-pointer hover:text-[#E6EDF3] w-16 select-none"
+              className="text-right px-3 py-2 text-fg-text-secondary font-medium cursor-pointer hover:text-fg-text w-16 select-none"
               onClick={() => handleSort('count')}
             >
               Count <SortIndicator column="count" />
@@ -145,20 +145,20 @@ export default function SpanTable({
             return (
               <tr
                 key={idx}
-                className="border-b border-[#21262D]/50 hover:bg-[#161B22] transition-colors group"
+                className="border-b border-fg-border/50 hover:bg-fg-hover transition-colors group"
               >
                 <td className="px-1 py-1.5">
                   <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
                       onClick={() => onSearchSpan(item.name)}
-                      className="p-0.5 rounded hover:bg-[#30363D] text-[#8B949E] hover:text-[#00D4FF]"
+                      className="p-0.5 rounded hover:bg-fg-active text-fg-text-secondary hover:text-fg-accent"
                       title="Search in flame graph"
                     >
                       <Search size={12} />
                     </button>
                     <button
                       onClick={() => onFocusSpan(item.representative)}
-                      className="p-0.5 rounded hover:bg-[#30363D] text-[#8B949E] hover:text-[#FFB020]"
+                      className="p-0.5 rounded hover:bg-fg-active text-fg-text-secondary hover:text-fg-amber"
                       title="Focus in flame graph"
                     >
                       <Focus size={12} />
@@ -171,41 +171,41 @@ export default function SpanTable({
                       className="inline-block w-2.5 h-2.5 rounded-sm flex-shrink-0"
                       style={{ backgroundColor: item.representative.color }}
                     />
-                    <span className="text-[#E6EDF3] truncate max-w-[300px]">
+                    <span className="text-fg-text truncate max-w-[300px]">
                       {item.name}
                     </span>
                     {item.isAsync && (
-                      <Layers size={10} className="text-[#00D4FF] flex-shrink-0" />
+                      <Layers size={10} className="text-fg-accent flex-shrink-0" />
                     )}
                   </div>
                 </td>
                 <td className="text-right px-3 py-1.5">
                   <div className="flex items-center justify-end gap-2">
-                    <div className="w-16 h-1.5 bg-[#21262D] rounded-full overflow-hidden">
+                    <div className="w-16 h-1.5 bg-fg-active rounded-full overflow-hidden">
                       <div
-                        className="h-full rounded-full bg-[#FFB020]"
+                        className="h-full rounded-full bg-fg-amber"
                         style={{ width: `${Math.min(100, selfPct)}%` }}
                       />
                     </div>
-                    <span className="text-[#FFB020] w-16 text-right">
+                    <span className="text-fg-amber w-16 text-right">
                       {formatDuration(item.selfTime)}
                     </span>
                   </div>
                 </td>
                 <td className="text-right px-3 py-1.5">
                   <div className="flex items-center justify-end gap-2">
-                    <div className="w-16 h-1.5 bg-[#21262D] rounded-full overflow-hidden">
+                    <div className="w-16 h-1.5 bg-fg-active rounded-full overflow-hidden">
                       <div
-                        className="h-full rounded-full bg-[#00D4FF]"
+                        className="h-full rounded-full bg-fg-accent"
                         style={{ width: `${Math.min(100, totalPct)}%` }}
                       />
                     </div>
-                    <span className="text-[#E6EDF3] w-16 text-right">
+                    <span className="text-fg-text w-16 text-right">
                       {formatDuration(item.totalTime)}
                     </span>
                   </div>
                 </td>
-                <td className="text-right px-3 py-1.5 text-[#8B949E]">
+                <td className="text-right px-3 py-1.5 text-fg-text-secondary">
                   {item.count}
                 </td>
               </tr>
@@ -214,7 +214,7 @@ export default function SpanTable({
         </tbody>
       </table>
       {sorted.length === 0 && (
-        <div className="text-center py-8 text-[#8B949E] text-xs">
+        <div className="text-center py-8 text-fg-text-secondary text-xs">
           No matching spans found
         </div>
       )}

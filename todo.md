@@ -1,5 +1,11 @@
 # TODO
 
+## Critical Fixes (Current)
+- [ ] Fix scrollbar thumb position — thumb shows at leftmost but viewport is offset; must reflect actual viewport position
+- [ ] Fix zoom-in (+) to zoom into top-left corner (start of timeline) instead of random center
+- [ ] Fix area-zoom to center the view on the dragged region, not jump to random position
+- [ ] Add light/dark mode toggle (default: dark mode)
+
 - [x] Remove onWheel zoom handler from FlameGraph canvas
 - [x] Add zoom in/out/reset buttons to Toolbar
 - [x] Compressed hash-fragment URL sharing (pako gzip + base64url)
